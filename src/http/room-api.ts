@@ -59,12 +59,18 @@ export function createRoomApi(deps: AppDeps): Hono {
 
     const meta = await deps.roomService.getRoomMeta(roomId);
     const state = await deps.stateStore.getRoomState(roomId);
+    const closedAt = Date.now();
     await RoomDispatcher.of(meta.roomType).dispatch(
       makeEventContext(deps, session, meta, state),
-      { roomId, roomMeta: meta, eventType: "sys:willShutdown", payload: {} },
+      {
+        roomId,
+        roomMeta: meta,
+        eventType: "sys:roomClosed",
+        payload: { roomId, reason: "manual", closedAt },
+      },
     );
     await deps.stateStore.setRoomState(roomId, state);
-    await deps.roomService.closeRoom(roomId);
+    await deps.roomService.closeRoom(roomId, "manual", closedAt);
     return c.json({ ok: true });
   });
 

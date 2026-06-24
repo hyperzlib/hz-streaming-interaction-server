@@ -3,7 +3,7 @@ import type { Repository } from "typeorm";
 import { z } from "zod";
 import { AppError } from "../errors";
 import { RoomRegistry } from "../core/room-registry";
-import type { RoomMeta, RoomState } from "../types";
+import type { RoomCloseReason, RoomMeta, RoomState } from "../types";
 import { RoomMetaEntity } from "../storage/room-meta.entity";
 import type { RoomStateStore } from "../storage/room-state-store";
 import type { SessionService } from "./session-service";
@@ -47,6 +47,7 @@ export class RoomService {
       passwordHash,
       createdAt: now,
       closedAt: null,
+      closedReason: null,
     };
 
     await this.rooms.save(meta);
@@ -93,12 +94,12 @@ export class RoomService {
     await this.rooms.save({ ...roomMeta, roomId });
   }
 
-  async closeRoom(roomId: string): Promise<void> {
+  async closeRoom(roomId: string, reason: RoomCloseReason, closedAt = Date.now()): Promise<void> {
     const meta = await this.getRoomMeta(roomId);
     if (meta.closedAt) {
       return;
     }
-    await this.updateRoomMeta(roomId, { ...meta, closedAt: Date.now() });
+    await this.updateRoomMeta(roomId, { ...meta, closedAt, closedReason: reason });
   }
 
   async getSnapshot(roomId: string): Promise<{ meta: RoomMeta; state: RoomState }> {
@@ -113,6 +114,19 @@ export class RoomService {
       .createQueryBuilder("room")
       .where("room.closedAt IS NULL")
       .getMany();
+  }
+
+  async getClosedRoomsBefore(cutoff: number): Promise<RoomMeta[]> {
+    return await this.rooms
+      .createQueryBuilder("room")
+      .where("room.closedAt IS NOT NULL")
+      .andWhere("room.closedAt <= :cutoff", { cutoff })
+      .getMany();
+  }
+
+  async deleteRoom(roomId: string): Promise<void> {
+    await this.rooms.delete({ roomId });
+    await this.stateStore.deleteRoomState(roomId);
   }
 }
 

@@ -30,5 +30,9 @@ export const RoomMetaEntity = new EntitySchema<RoomMeta>({
       type: "integer",
       nullable: true,
     },
+    closedReason: {
+      type: "varchar",
+      nullable: true,
+    },
   },
 });

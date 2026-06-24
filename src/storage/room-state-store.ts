@@ -19,6 +19,11 @@ export class RoomStateStore {
     await this.redis.setJson(this.stateKey(roomId), state);
   }
 
+  async deleteRoomState(roomId: string): Promise<void> {
+    await this.redis.delete(this.stateKey(roomId));
+    await this.redis.delete(this.seqKey(roomId));
+  }
+
   async nextSeq(roomId: string): Promise<number> {
     return await this.redis.incr(this.seqKey(roomId));
   }

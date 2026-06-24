@@ -2,6 +2,12 @@ import { createRuleSet } from "../core/rule-set";
 import { z } from "zod";
 import type { Member, RoomState } from "../types";
 
+const roomClosedSchema = z.object({
+  roomId: z.string(),
+  reason: z.enum(["manual", "owner_offline", "empty_room", "server_shutdown"]),
+  closedAt: z.number(),
+});
+
 const userLifecycleSchema = z.object({
   sessionId: z.string(),
   role: z.enum(["host", "participant"]),
@@ -26,6 +32,14 @@ export const baseRoomRules = createRuleSet()
     await ctx.broadcast({
       type: "sys:willShutdown",
       payload: { roomId: ctx.roomId },
+    });
+  })
+  .on("sys:roomClosed", async (ctx, payload, next) => {
+    const data = roomClosedSchema.parse(payload);
+    await next();
+    await ctx.broadcast({
+      type: "sys:roomClosed",
+      payload: data,
     });
   })
   .on("sys:userJoin", async (ctx, payload, next) => {

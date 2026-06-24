@@ -20,6 +20,12 @@ keyPrefix = "hz:"
 [session]
 ttlSeconds = 604800
 
+[roomCleanup]
+ownerOfflineGraceSeconds = 1200
+emptyRoomGraceSeconds = 120
+closedRoomRetentionSeconds = 1800
+scanIntervalSeconds = 30
+
 [auth]
 enabled = false
 issuer = ""

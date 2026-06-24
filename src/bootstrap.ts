@@ -12,6 +12,7 @@ import { registerModules } from "./modules/score-room";
 import { RoomDispatcher } from "./core/room-dispatcher";
 import { UserService, createUserRepository } from "./services/user-service";
 import { OidcService } from "./services/oidc-service";
+import { RoomCleanupService } from "./services/room-cleanup-service";
 
 export async function bootstrap(config: AppConfig) {
   registerModules();
@@ -29,6 +30,12 @@ export async function bootstrap(config: AppConfig) {
     sessionService,
   );
   const broadcastProvider = new InProcessWsBroadcastProvider(stateStore);
+  const roomCleanupService = new RoomCleanupService(
+    roomService,
+    stateStore,
+    broadcastProvider,
+    config.roomCleanup,
+  );
   const commandUrl = `${config.server.publicBaseUrl.replace(/^http/, "ws")}${config.server.wsPath}`;
 
   const app = createApp({
@@ -75,10 +82,13 @@ export async function bootstrap(config: AppConfig) {
     await stateStore.setRoomState(meta.roomId, state);
   }
 
+  roomCleanupService.start();
+
   return {
     app,
     websocket: (await import("hono/bun")).websocket,
     port: config.server.port,
     dataSource,
+    roomCleanupService,
   };
 }

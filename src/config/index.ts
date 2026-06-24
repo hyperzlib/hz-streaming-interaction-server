@@ -23,6 +23,12 @@ export type AppConfig = {
   session: {
     ttlSeconds: number;
   };
+  roomCleanup: {
+    ownerOfflineGraceSeconds: number;
+    emptyRoomGraceSeconds: number;
+    closedRoomRetentionSeconds: number;
+    scanIntervalSeconds: number;
+  };
   auth: {
     enabled: boolean;
     issuer: string;
@@ -68,6 +74,7 @@ export async function loadConfig(path = localConfigPath): Promise<AppConfig> {
   const database = asRecord(parsed.database);
   const redis = asRecord(parsed.redis);
   const session = asRecord(parsed.session);
+  const roomCleanup = asRecord(parsed.roomCleanup);
   const auth = asRecord(parsed.auth);
 
   return {
@@ -94,6 +101,24 @@ export async function loadConfig(path = localConfigPath): Promise<AppConfig> {
     },
     session: {
       ttlSeconds: Number(process.env.SESSION_TTL_SECONDS ?? numberValue(session.ttlSeconds, 604800)),
+    },
+    roomCleanup: {
+      ownerOfflineGraceSeconds: Number(
+        process.env.ROOM_OWNER_OFFLINE_GRACE_SECONDS
+          ?? numberValue(roomCleanup.ownerOfflineGraceSeconds, 1200),
+      ),
+      emptyRoomGraceSeconds: Number(
+        process.env.ROOM_EMPTY_GRACE_SECONDS
+          ?? numberValue(roomCleanup.emptyRoomGraceSeconds, 120),
+      ),
+      closedRoomRetentionSeconds: Number(
+        process.env.ROOM_CLOSED_RETENTION_SECONDS
+          ?? numberValue(roomCleanup.closedRoomRetentionSeconds, 1800),
+      ),
+      scanIntervalSeconds: Number(
+        process.env.ROOM_CLEANUP_SCAN_INTERVAL_SECONDS
+          ?? numberValue(roomCleanup.scanIntervalSeconds, 30),
+      ),
     },
     auth: {
       enabled: process.env.AUTH_ENABLED

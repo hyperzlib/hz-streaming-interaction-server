@@ -79,4 +79,42 @@ describe("RoomService", () => {
 
     await dataSource.destroy();
   });
+
+  test("closes room with reason without overwriting first close", async () => {
+    const { dataSource, roomService } = await createTestRoomService();
+
+    const { roomId } = await roomService.createRoom({
+      roomType: "score",
+      ownerId: "owner-1",
+      isPublicRead: false,
+    });
+
+    await roomService.closeRoom(roomId, "manual", 1000);
+    await roomService.closeRoom(roomId, "empty_room", 2000);
+
+    const meta = await roomService.getRoomMeta(roomId);
+    expect(meta.closedAt).toBe(1000);
+    expect(meta.closedReason).toBe("manual");
+
+    await dataSource.destroy();
+  });
+
+  test("deletes closed room metadata and Redis state", async () => {
+    const { dataSource, roomService, stateStore } = await createTestRoomService();
+
+    const { roomId } = await roomService.createRoom({
+      roomType: "score",
+      ownerId: "owner-1",
+      isPublicRead: false,
+    });
+    await stateStore.nextSeq(roomId);
+    await roomService.closeRoom(roomId, "manual", 1000);
+    await roomService.deleteRoom(roomId);
+
+    await expect(roomService.getRoomMeta(roomId)).rejects.toThrow("Room not found");
+    expect(await stateStore.getRoomState(roomId)).toEqual({ members: {} });
+    expect(await stateStore.nextSeq(roomId)).toBe(1);
+
+    await dataSource.destroy();
+  });
 });
