@@ -1,0 +1,33 @@
+[server]
+port = 3000
+publicBaseUrl = "http://localhost:3000"
+wsPath = "/ws/command"
+
+[database]
+type = "sqlite"
+sqlitePath = "./data/dev.sqlite"
+synchronize = true
+mysqlHost = "127.0.0.1"
+mysqlPort = 3306
+mysqlUsername = "root"
+mysqlPassword = ""
+mysqlDatabase = "hz_hang_to_la"
+
+[redis]
+url = "redis://127.0.0.1:6379/0"
+keyPrefix = "hz:"
+
+[session]
+ttlSeconds = 604800
+
+[auth]
+enabled = false
+issuer = "https://idp.example.com/"
+clientId = "your-client-id"
+clientSecret = "your-client-secret"
+redirectUri = "http://localhost:3000/auth/callback"
+scopes = "openid profile email"
+sessionTtlSeconds = 604800
+loginStateTtlSeconds = 1200
+postLogoutRedirectUri = "http://localhost:3000/"
+editProfileUrl = ""

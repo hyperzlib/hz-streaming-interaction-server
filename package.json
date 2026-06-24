@@ -1,0 +1,26 @@
+{
+  "name": "hz-hang-to-la-server",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "start": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+    "dependencies": {
+    "argon2": "^0.44.0",
+    "better-sqlite3": "^12.4.1",
+    "hono": "^4.12.27",
+    "mysql2": "^3.16.0",
+    "oauth4webapi": "^3.8.6",
+    "reflect-metadata": "^0.2.2",
+    "typeorm": "^0.3.28",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.5",
+    "typescript": "^5.9.3"
+  }
+}
