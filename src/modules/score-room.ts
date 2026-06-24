@@ -14,9 +14,9 @@ export const scoreRoomRules = createRuleSet()
     createRuleSet().on("score:set", async (ctx, payload, next) => {
       const data = scoreSetSchema.parse(payload);
       const key = data.targetUserId ?? ctx.session.userId ?? ctx.session.sessionId;
-      const scores = (ctx.state.scores ?? {}) as Record<string, number>;
+      const scores = await ctx.state.fields.get<Record<string, number>>("scores", {});
       scores[key] = data.score;
-      ctx.state.scores = scores;
+      await ctx.state.fields.set("scores", scores);
       await next();
       await ctx.broadcast({
         type: "score:set",

@@ -1,8 +1,9 @@
 import { RoomDispatcher } from "../core/room-dispatcher";
 import type { InProcessWsBroadcastProvider } from "./broadcast-provider";
 import type { RoomService } from "./room-service";
+import type { RoomState } from "../storage/room-state";
 import type { RoomStateStore } from "../storage/room-state-store";
-import type { Member, RoomCloseReason, RoomMeta, RoomState, Session } from "../types";
+import type { Member, RoomCloseReason, RoomMeta, Session } from "../types";
 
 export type RoomCleanupConfig = {
   ownerOfflineGraceSeconds: number;
@@ -58,20 +59,20 @@ export class RoomCleanupService {
   async scanOnce(): Promise<void> {
     const now = this.now();
     for (const meta of await this.roomService.getActiveRooms()) {
-      const state = await this.stateStore.getRoomState(meta.roomId);
-      const cleanup = cleanupState(state);
+      const state = this.stateStore.forRoom(meta.roomId);
+      const cleanup = await cleanupState(state);
 
-      if (this.shouldCloseForOwnerOffline(meta, state, cleanup, now)) {
+      if (await this.shouldCloseForOwnerOffline(meta, state, cleanup, now)) {
         await this.closeRoom(meta, state, "owner_offline", now);
         continue;
       }
 
-      if (this.shouldCloseForEmptyRoom(state, cleanup, now)) {
+      if (await this.shouldCloseForEmptyRoom(state, cleanup, now)) {
         await this.closeRoom(meta, state, "empty_room", now);
         continue;
       }
 
-      await this.stateStore.setRoomState(meta.roomId, state);
+      await state.fields.set(CLEANUP_STATE_KEY, cleanup);
     }
   }
 
@@ -82,13 +83,13 @@ export class RoomCleanupService {
     }
   }
 
-  private shouldCloseForOwnerOffline(
+  private async shouldCloseForOwnerOffline(
     meta: RoomMeta,
     state: RoomState,
     cleanup: CleanupState,
     now: number,
-  ): boolean {
-    const owner = findOwnerMember(meta, state);
+  ): Promise<boolean> {
+    const owner = await findOwnerMember(meta, state);
     if (owner?.presence === "online") {
       cleanup.ownerOfflineSince = undefined;
       return false;
@@ -99,8 +100,8 @@ export class RoomCleanupService {
     return now - ownerOfflineSince >= this.config.ownerOfflineGraceSeconds * 1000;
   }
 
-  private shouldCloseForEmptyRoom(state: RoomState, cleanup: CleanupState, now: number): boolean {
-    if (effectiveMemberCount(state) > 0) {
+  private async shouldCloseForEmptyRoom(state: RoomState, cleanup: CleanupState, now: number): Promise<boolean> {
+    if (await effectiveMemberCount(state) > 0) {
       cleanup.emptyRoomSince = undefined;
       return false;
     }
@@ -128,30 +129,28 @@ export class RoomCleanupService {
         },
       },
     );
-    await this.stateStore.setRoomState(meta.roomId, state);
     await this.roomService.closeRoom(meta.roomId, reason, closedAt);
   }
 }
 
-function cleanupState(state: RoomState): CleanupState {
-  const existing = state[CLEANUP_STATE_KEY];
+async function cleanupState(state: RoomState): Promise<CleanupState> {
+  const existing = await state.fields.get<CleanupState>(CLEANUP_STATE_KEY);
   if (existing && typeof existing === "object") {
-    return existing as CleanupState;
+    return existing;
   }
 
   const cleanup: CleanupState = {};
-  state[CLEANUP_STATE_KEY] = cleanup;
   return cleanup;
 }
 
-function findOwnerMember(meta: RoomMeta, state: RoomState): Member | undefined {
-  return Object.values(state.members ?? {}).find(
+async function findOwnerMember(meta: RoomMeta, state: RoomState): Promise<Member | undefined> {
+  return await state.members.find(
     (member) => member.role === "host" || member.userId === meta.ownerId,
   );
 }
 
-function effectiveMemberCount(state: RoomState): number {
-  return Object.keys(state.members ?? {}).length;
+async function effectiveMemberCount(state: RoomState): Promise<number> {
+  return await state.members.count();
 }
 
 function makeSystemEventContext(

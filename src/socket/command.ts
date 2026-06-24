@@ -8,8 +8,10 @@ import { clientCommandSchema } from "../http/schemas";
 import type { InProcessWsBroadcastProvider } from "../services/broadcast-provider";
 import type { RoomService } from "../services/room-service";
 import type { SessionService } from "../services/session-service";
+import type { RoomState } from "../storage/room-state";
 import type { RoomStateStore } from "../storage/room-state-store";
-import type { RoomMeta, RoomState, Session } from "../types";
+import type { RoomMeta, Session, EventContext } from "../types";
+import { WSContext } from "hono/ws";
 
 export type CommandSocketDeps = {
   roomService: RoomService;
@@ -46,12 +48,12 @@ export function createCommandSocketApi(deps: CommandSocketDeps): Hono {
           }
 
           const meta = await deps.roomService.getRoomMeta(session.roomId);
-          const state = await deps.stateStore.getRoomState(session.roomId);
           joinedRoomId = session.roomId;
           deps.broadcastProvider.addSocket(joinedRoomId, ws);
           markSessionConnected(activeSessionConnections, leaveTimers, session);
+          const state = deps.stateStore.forRoom(session.roomId);
           await RoomDispatcher.of(meta.roomType).dispatch(
-            makeEventContext(deps, session, meta, state),
+            makeEventContext(deps, session, meta, state, ws),
             {
               roomId: session.roomId,
               roomMeta: meta,
@@ -59,7 +61,6 @@ export function createCommandSocketApi(deps: CommandSocketDeps): Hono {
               payload: session,
             },
           );
-          await deps.stateStore.setRoomState(session.roomId, state);
         },
         async onMessage(event, ws) {
           if (!session) {
@@ -82,7 +83,7 @@ export function createCommandSocketApi(deps: CommandSocketDeps): Hono {
               throw new AppError("ROOM_CLOSED", "Room is closed", 410);
             }
 
-            const state = await deps.stateStore.getRoomState(command.roomId);
+            const state = deps.stateStore.forRoom(command.roomId);
             await RoomDispatcher.of(meta.roomType).dispatch(
               makeEventContext(deps, session, meta, state),
               {
@@ -92,7 +93,6 @@ export function createCommandSocketApi(deps: CommandSocketDeps): Hono {
                 payload: command.payload,
               },
             );
-            await deps.stateStore.setRoomState(command.roomId, state);
             ws.send(JSON.stringify({ id: command.id, ok: true }));
           } catch (error) {
             const appError = error instanceof z.ZodError
@@ -162,7 +162,7 @@ async function dispatchSystemEvent(
   eventType: "sys:userOffline" | "sys:userLeave",
 ): Promise<void> {
   const meta = await deps.roomService.getRoomMeta(session.roomId);
-  const state = await deps.stateStore.getRoomState(session.roomId);
+  const state = deps.stateStore.forRoom(session.roomId);
   await RoomDispatcher.of(meta.roomType).dispatch(
     makeEventContext(deps, session, meta, state),
     {
@@ -172,7 +172,6 @@ async function dispatchSystemEvent(
       payload: session,
     },
   );
-  await deps.stateStore.setRoomState(session.roomId, state);
 }
 
 function scheduleUserLeave(
@@ -197,8 +196,8 @@ async function dispatchLeaveIfStillOffline(
   session: Session,
 ): Promise<void> {
   try {
-    const state = await deps.stateStore.getRoomState(session.roomId);
-    const member = state.members[session.sessionId];
+    const state = deps.stateStore.forRoom(session.roomId);
+    const member = await state.members.get(session.sessionId);
     if (!member || member.presence !== "offline") {
       return;
     }
@@ -214,12 +213,16 @@ function makeEventContext(
   session: Session,
   roomMeta: RoomMeta,
   state: RoomState,
+  ws?: WSContext<any>
 ) {
   return {
     roomId: roomMeta.roomId,
     roomMeta,
     session,
     state,
+    send: async (event: { type: string; payload: unknown }) => {
+      ws?.send(JSON.stringify(event));
+    },
     broadcast: async (event: { type: string; payload: unknown }) => {
       await deps.broadcastProvider.publishRoomEvent({
         roomId: roomMeta.roomId,
@@ -227,7 +230,7 @@ function makeEventContext(
         payload: event.payload,
       });
     },
-  };
+  } satisfies EventContext;
 }
 
 async function webSocketDataToString(data: unknown): Promise<string> {

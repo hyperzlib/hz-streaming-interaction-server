@@ -52,7 +52,7 @@ export async function bootstrap(config: AppConfig) {
   });
 
   for (const meta of await roomService.getActiveRooms()) {
-    const state = await stateStore.getRoomState(meta.roomId);
+    const state = stateStore.forRoom(meta.roomId);
     await RoomDispatcher.of(meta.roomType).dispatch(
       {
         roomId: meta.roomId,
@@ -79,7 +79,6 @@ export async function bootstrap(config: AppConfig) {
         payload: {},
       },
     );
-    await stateStore.setRoomState(meta.roomId, state);
   }
 
   roomCleanupService.start();

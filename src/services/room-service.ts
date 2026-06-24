@@ -3,7 +3,7 @@ import type { Repository } from "typeorm";
 import { z } from "zod";
 import { AppError } from "../errors";
 import { RoomRegistry } from "../core/room-registry";
-import type { RoomCloseReason, RoomMeta, RoomState } from "../types";
+import type { RoomCloseReason, RoomMeta, RoomStateSnapshot } from "../types";
 import { RoomMetaEntity } from "../storage/room-meta.entity";
 import type { RoomStateStore } from "../storage/room-state-store";
 import type { SessionService } from "./session-service";
@@ -102,7 +102,7 @@ export class RoomService {
     await this.updateRoomMeta(roomId, { ...meta, closedAt, closedReason: reason });
   }
 
-  async getSnapshot(roomId: string): Promise<{ meta: RoomMeta; state: RoomState }> {
+  async getSnapshot(roomId: string): Promise<{ meta: RoomMeta; state: RoomStateSnapshot }> {
     return {
       meta: await this.getRoomMeta(roomId),
       state: await this.stateStore.getRoomState(roomId),

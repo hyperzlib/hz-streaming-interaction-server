@@ -10,7 +10,7 @@ import { createBunSqliteConnection } from "../src/storage/bun-sqlite-better-sqli
 import { MemoryRedisFacade } from "../src/storage/redis-facade";
 import { RoomMetaEntity } from "../src/storage/room-meta.entity";
 import { RoomStateStore } from "../src/storage/room-state-store";
-import type { RoomState } from "../src/types";
+import type { RoomStateSnapshot } from "../src/types";
 
 const cleanupConfig: RoomCleanupConfig = {
   ownerOfflineGraceSeconds: 1200,
@@ -176,7 +176,7 @@ describe("RoomCleanupService", () => {
     await cleanupService.deleteExpiredOnce();
 
     await expect(roomService.getRoomMeta(roomId)).rejects.toThrow("Room not found");
-    expect(await stateStore.getRoomState(roomId)).toEqual({ members: {} } satisfies RoomState);
+    expect(await stateStore.getRoomState(roomId)).toEqual({ members: {} } satisfies RoomStateSnapshot);
     expect(await stateStore.nextSeq(roomId)).toBe(1);
     expect(nowRef.value).toBe(1801_000);
 

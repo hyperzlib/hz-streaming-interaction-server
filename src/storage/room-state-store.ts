@@ -1,35 +1,35 @@
-import type { RoomState } from "../types";
+import type { RoomStateSnapshot } from "../types";
 import type { RedisFacade } from "./redis-facade";
+import { RoomState } from "./room-state";
 
 export class RoomStateStore {
   constructor(private readonly redis: RedisFacade) {}
 
-  async initRoomState(roomId: string): Promise<RoomState> {
-    const state: RoomState = { members: {} };
-    await this.redis.setJson(this.stateKey(roomId), state);
+  forRoom(roomId: string): RoomState {
+    return new RoomState(roomId, this.redis);
+  }
+
+  async initRoomState(roomId: string): Promise<RoomStateSnapshot> {
+    const state: RoomStateSnapshot = { members: {} };
+    await this.forRoom(roomId).replace(state);
     await this.redis.setJson(this.seqKey(roomId), 0);
     return state;
   }
 
-  async getRoomState(roomId: string): Promise<RoomState> {
-    return (await this.redis.getJson<RoomState>(this.stateKey(roomId))) ?? { members: {} };
+  async getRoomState(roomId: string): Promise<RoomStateSnapshot> {
+    return await this.forRoom(roomId).snapshot();
   }
 
-  async setRoomState(roomId: string, state: RoomState): Promise<void> {
-    await this.redis.setJson(this.stateKey(roomId), state);
+  async setRoomState(roomId: string, state: RoomStateSnapshot): Promise<void> {
+    await this.forRoom(roomId).replace(state);
   }
 
   async deleteRoomState(roomId: string): Promise<void> {
-    await this.redis.delete(this.stateKey(roomId));
-    await this.redis.delete(this.seqKey(roomId));
+    await this.forRoom(roomId).delete();
   }
 
   async nextSeq(roomId: string): Promise<number> {
-    return await this.redis.incr(this.seqKey(roomId));
-  }
-
-  private stateKey(roomId: string): string {
-    return `room:${roomId}:state`;
+    return await this.forRoom(roomId).nextSeq();
   }
 
   private seqKey(roomId: string): string {

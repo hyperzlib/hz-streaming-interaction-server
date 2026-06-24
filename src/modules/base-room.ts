@@ -1,6 +1,5 @@
 import { createRuleSet } from "../core/rule-set";
 import { z } from "zod";
-import type { Member, RoomState } from "../types";
 
 const roomClosedSchema = z.object({
   roomId: z.string(),
@@ -14,17 +13,19 @@ const userLifecycleSchema = z.object({
   userId: z.string().optional(),
 });
 
-function members(state: RoomState): Record<string, Member> {
-  state.members ??= {};
-  return state.members;
-}
-
 export const baseRoomRules = createRuleSet()
   .on("sys:reload", async (ctx, _payload, next) => {
-    for (const member of Object.values(members(ctx.state))) {
-      member.presence = "offline";
-      member.lastSeenAt = Date.now();
-    }
+    const members = await ctx.state.members.all();
+    const now = Date.now();
+    await Promise.all(
+      Object.values(members).map((member) =>
+        ctx.state.members.set(member.sessionId, {
+          ...member,
+          presence: "offline",
+          lastSeenAt: now,
+        }),
+      ),
+    );
     await next();
   })
   .on("sys:willShutdown", async (ctx, _payload, next) => {
@@ -45,14 +46,15 @@ export const baseRoomRules = createRuleSet()
   .on("sys:userJoin", async (ctx, payload, next) => {
     const data = userLifecycleSchema.parse(payload);
     const now = Date.now();
-    members(ctx.state)[data.sessionId] = {
+    const existing = await ctx.state.members.get(data.sessionId);
+    await ctx.state.members.set(data.sessionId, {
       sessionId: data.sessionId,
       role: data.role,
       userId: data.userId,
-      joinedAt: members(ctx.state)[data.sessionId]?.joinedAt ?? now,
+      joinedAt: existing?.joinedAt ?? now,
       lastSeenAt: now,
       presence: "online",
-    };
+    });
     await next();
     await ctx.broadcast({
       type: "sys:userJoin",
@@ -61,10 +63,13 @@ export const baseRoomRules = createRuleSet()
   })
   .on("sys:userOffline", async (ctx, payload, next) => {
     const data = userLifecycleSchema.parse(payload);
-    const member = members(ctx.state)[data.sessionId];
+    const member = await ctx.state.members.get(data.sessionId);
     if (member) {
-      member.presence = "offline";
-      member.lastSeenAt = Date.now();
+      await ctx.state.members.set(data.sessionId, {
+        ...member,
+        presence: "offline",
+        lastSeenAt: Date.now(),
+      });
     }
     await next();
     await ctx.broadcast({
@@ -74,7 +79,7 @@ export const baseRoomRules = createRuleSet()
   })
   .on("sys:userLeave", async (ctx, payload, next) => {
     const data = userLifecycleSchema.parse(payload);
-    delete members(ctx.state)[data.sessionId];
+    await ctx.state.members.delete(data.sessionId);
     await next();
     await ctx.broadcast({
       type: "sys:userLeave",

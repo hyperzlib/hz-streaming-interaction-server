@@ -1,3 +1,5 @@
+import type { RoomState } from "./storage/room-state";
+
 export type MemberPresence = "online" | "offline";
 
 export type RoomCloseReason = "manual" | "owner_offline" | "empty_room" | "server_shutdown";
@@ -28,7 +30,7 @@ export type RoomMeta = {
   closedReason?: RoomCloseReason | null;
 };
 
-export type RoomState = {
+export type RoomStateSnapshot = {
   members: Record<string, Member>;
 } & Record<string, unknown>;
 
@@ -58,6 +60,7 @@ export type EventContext = {
   roomId: string;
   roomMeta: RoomMeta;
   session: Session;
+  send: (event: Omit<RoomEvent, "roomId" | "seq" | "timestamp">) => Promise<void>;
   broadcast: (event: Omit<RoomEvent, "roomId" | "seq" | "timestamp">) => Promise<void>;
   state: RoomState;
 };

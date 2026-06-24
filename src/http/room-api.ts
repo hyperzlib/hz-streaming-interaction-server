@@ -5,7 +5,8 @@ import {
   createRoomInputSchema,
   joinRoomInputSchema,
 } from "../services/room-service";
-import type { RoomMeta, RoomState, Session } from "../types";
+import type { RoomState } from "../storage/room-state";
+import type { RoomMeta, Session } from "../types";
 import { readBearerOrQueryToken, requireAuthUser, requireSession } from "./auth";
 import { closeRoomSchema } from "./schemas";
 import { AppDeps } from "@/app";
@@ -58,7 +59,7 @@ export function createRoomApi(deps: AppDeps): Hono {
     }
 
     const meta = await deps.roomService.getRoomMeta(roomId);
-    const state = await deps.stateStore.getRoomState(roomId);
+    const state = deps.stateStore.forRoom(roomId);
     const closedAt = Date.now();
     await RoomDispatcher.of(meta.roomType).dispatch(
       makeEventContext(deps, session, meta, state),
@@ -69,7 +70,6 @@ export function createRoomApi(deps: AppDeps): Hono {
         payload: { roomId, reason: "manual", closedAt },
       },
     );
-    await deps.stateStore.setRoomState(roomId, state);
     await deps.roomService.closeRoom(roomId, "manual", closedAt);
     return c.json({ ok: true });
   });
@@ -88,6 +88,9 @@ function makeEventContext(
     roomMeta,
     session,
     state,
+    send: async (event: { type: string; payload: unknown }) => {
+      // bypass
+    },
     broadcast: async (event: { type: string; payload: unknown }) => {
       await deps.broadcastProvider.publishRoomEvent({
         roomId: roomMeta.roomId,

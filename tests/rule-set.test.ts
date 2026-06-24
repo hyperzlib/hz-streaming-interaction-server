@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { executeRuleSet } from "../src/core/event-pipeline";
 import { createRuleSet } from "../src/core/rule-set";
+import { MemoryRedisFacade } from "../src/storage/redis-facade";
+import { RoomStateStore } from "../src/storage/room-state-store";
 import type { EventContext } from "../src/types";
 
 function context(): EventContext {
@@ -18,7 +20,7 @@ function context(): EventContext {
       roomId: "room-1",
       role: "host",
     },
-    state: { members: {} },
+    state: new RoomStateStore(new MemoryRedisFacade()).forRoom("room-1"),
     broadcast: async () => {},
   };
 }
