@@ -29,6 +29,20 @@ export type AppConfig = {
     closedRoomRetentionSeconds: number;
     scanIntervalSeconds: number;
   };
+  resources: {
+    provider: "local" | "s3";
+    localDir: string;
+    uploadUrlTtlSeconds: number;
+    cleanupScanIntervalSeconds: number;
+    localSigningSecret: string;
+    s3Region: string;
+    s3Bucket: string;
+    s3Endpoint: string;
+    s3AccessKeyId: string;
+    s3SecretAccessKey: string;
+    s3ForcePathStyle: boolean;
+    s3PublicBaseUrl: string;
+  };
   auth: {
     enabled: boolean;
     issuer: string;
@@ -75,6 +89,7 @@ export async function loadConfig(path = localConfigPath): Promise<AppConfig> {
   const redis = asRecord(parsed.redis);
   const session = asRecord(parsed.session);
   const roomCleanup = asRecord(parsed.roomCleanup);
+  const resources = asRecord(parsed.resources);
   const auth = asRecord(parsed.auth);
 
   return {
@@ -119,6 +134,29 @@ export async function loadConfig(path = localConfigPath): Promise<AppConfig> {
         process.env.ROOM_CLEANUP_SCAN_INTERVAL_SECONDS
           ?? numberValue(roomCleanup.scanIntervalSeconds, 30),
       ),
+    },
+    resources: {
+      provider: (process.env.RES_PROVIDER ?? stringValue(resources.provider, "local")) as "local" | "s3",
+      localDir: process.env.RES_LOCAL_DIR ?? stringValue(resources.localDir, "./data/resources"),
+      uploadUrlTtlSeconds: Number(
+        process.env.RES_UPLOAD_URL_TTL_SECONDS
+          ?? numberValue(resources.uploadUrlTtlSeconds, 900),
+      ),
+      cleanupScanIntervalSeconds: Number(
+        process.env.RES_CLEANUP_SCAN_INTERVAL_SECONDS
+          ?? numberValue(resources.cleanupScanIntervalSeconds, 60),
+      ),
+      localSigningSecret: process.env.RES_LOCAL_SIGNING_SECRET
+        ?? stringValue(resources.localSigningSecret, "dev-resource-signing-secret"),
+      s3Region: process.env.RES_S3_REGION ?? stringValue(resources.s3Region, "us-east-1"),
+      s3Bucket: process.env.RES_S3_BUCKET ?? stringValue(resources.s3Bucket, ""),
+      s3Endpoint: process.env.RES_S3_ENDPOINT ?? stringValue(resources.s3Endpoint, ""),
+      s3AccessKeyId: process.env.RES_S3_ACCESS_KEY_ID ?? stringValue(resources.s3AccessKeyId, ""),
+      s3SecretAccessKey: process.env.RES_S3_SECRET_ACCESS_KEY ?? stringValue(resources.s3SecretAccessKey, ""),
+      s3ForcePathStyle: process.env.RES_S3_FORCE_PATH_STYLE
+        ? process.env.RES_S3_FORCE_PATH_STYLE === "true"
+        : booleanValue(resources.s3ForcePathStyle, false),
+      s3PublicBaseUrl: process.env.RES_S3_PUBLIC_BASE_URL ?? stringValue(resources.s3PublicBaseUrl, ""),
     },
     auth: {
       enabled: process.env.AUTH_ENABLED

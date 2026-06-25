@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { RoomRegistry } from "../core/room-registry";
 import { createRuleSet } from "../core/rule-set";
-import { baseRoomRules } from "./base-room";
+import { baseRoomRules } from "./common/base-room";
 
 const scoreSetSchema = z.object({
   targetUserId: z.string().optional(),
@@ -13,7 +13,7 @@ export const scoreRoomRules = createRuleSet()
   .use(
     createRuleSet().on("score:set", async (ctx, payload, next) => {
       const data = scoreSetSchema.parse(payload);
-      const key = data.targetUserId ?? ctx.session.userId ?? ctx.session.sessionId;
+      const key = data.targetUserId ?? ctx.session.roomUserId;
       const scores = await ctx.state.fields.get<Record<string, number>>("scores", {});
       scores[key] = data.score;
       await ctx.state.fields.set("scores", scores);

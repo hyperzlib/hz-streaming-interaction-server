@@ -13,6 +13,7 @@ export type RoomClosedPayload = {
 export type Member = {
   sessionId: string;
   role: "host" | "participant";
+  roomUserId: string;
   userId?: string;
   joinedAt: number;
   lastSeenAt: number;
@@ -38,6 +39,7 @@ export type Session = {
   sessionId: string;
   roomId: string;
   role: "host" | "participant";
+  roomUserId: string;
   userId?: string;
 };
 

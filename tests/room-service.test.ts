@@ -52,6 +52,8 @@ describe("RoomService", () => {
     expect(state).toEqual({ members: {} });
     expect(session?.role).toBe("host");
     expect(session?.roomId).toBe(result.roomId);
+    expect(session?.userId).toBe("owner-1");
+    expect(session?.roomUserId).toBe("user:owner-1");
 
     await dataSource.destroy();
   });
@@ -76,6 +78,24 @@ describe("RoomService", () => {
       password: "secret",
     });
     expect(joined.token.length).toBeGreaterThan(20);
+
+    await dataSource.destroy();
+  });
+
+  test("creates temporary room user id when joining without login user id", async () => {
+    const { dataSource, roomService, sessionService } = await createTestRoomService();
+
+    const { roomId } = await roomService.createRoom({
+      roomType: "score",
+      ownerId: "owner-1",
+      isPublicRead: false,
+    });
+
+    const joined = await roomService.joinRoom({ roomId });
+    const session = await sessionService.getSession(joined.token);
+
+    expect(session?.userId).toBeUndefined();
+    expect(session?.roomUserId.startsWith("temp:")).toBe(true);
 
     await dataSource.destroy();
   });

@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { DataSource } from "typeorm";
 import type { AppConfig } from "../config";
 import { createBunSqliteConnection } from "./bun-sqlite-better-sqlite3";
+import { ResourceFileEntity } from "./resource-file.entity";
 import { RoomMetaEntity } from "./room-meta.entity";
 import { UserEntity } from "./user.entity";
 
@@ -17,7 +18,7 @@ export function createDataSource(config: AppConfig): DataSource {
       password: config.database.mysqlPassword,
       database: config.database.mysqlDatabase,
       synchronize: config.database.synchronize,
-      entities: [RoomMetaEntity, UserEntity],
+      entities: [RoomMetaEntity, UserEntity, ResourceFileEntity],
     });
   }
 
@@ -29,6 +30,6 @@ export function createDataSource(config: AppConfig): DataSource {
     database: sqlitePath,
     driver: createBunSqliteConnection,
     synchronize: config.database.synchronize,
-    entities: [RoomMetaEntity, UserEntity],
+    entities: [RoomMetaEntity, UserEntity, ResourceFileEntity],
   });
 }

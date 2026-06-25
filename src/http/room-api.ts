@@ -7,18 +7,22 @@ import {
 } from "../services/room-service";
 import type { RoomState } from "../storage/room-state";
 import type { RoomMeta, Session } from "../types";
-import { readBearerOrQueryToken, requireAuthUser, requireSession } from "./auth";
+import { getOptionalAuthUser, readBearerOrQueryToken, requireAuthUser, requireSession } from "./auth";
 import { closeRoomSchema } from "./schemas";
 import { AppDeps } from "@/app";
 
 export function createRoomApi(deps: AppDeps): Hono {
   const app = new Hono();
+  const createRoomBodySchema = createRoomInputSchema.omit({ ownerId: true });
 
   app.post("/rooms/create", async (c) => {
-    await requireAuthUser(c.req.header("authorization"), deps);
+    const user = await requireAuthUser(c.req.header("authorization"), deps);
     
-    const input = createRoomInputSchema.parse(await c.req.json());
-    const result = await deps.roomService.createRoom(input);
+    const input = createRoomBodySchema.parse(await c.req.json());
+    const result = await deps.roomService.createRoom({
+      ...input,
+      ownerId: user.id,
+    });
     return c.json({
       ...result,
       sockets: deps.sockets,
@@ -26,8 +30,12 @@ export function createRoomApi(deps: AppDeps): Hono {
   });
 
   app.post("/rooms/join", async (c) => {
+    const user = await getOptionalAuthUser(c.req.header("authorization"), deps);
     const input = joinRoomInputSchema.parse(await c.req.json());
-    const result = await deps.roomService.joinRoom(input);
+    const result = await deps.roomService.joinRoom({
+      ...input,
+      userId: user?.id,
+    });
     return c.json({
       ...result,
       sockets: deps.sockets,
@@ -88,9 +96,7 @@ function makeEventContext(
     roomMeta,
     session,
     state,
-    send: async (event: { type: string; payload: unknown }) => {
-      // bypass
-    },
+    send: async () => {},
     broadcast: async (event: { type: string; payload: unknown }) => {
       await deps.broadcastProvider.publishRoomEvent({
         roomId: roomMeta.roomId,

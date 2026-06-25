@@ -13,6 +13,8 @@ import { RoomDispatcher } from "./core/room-dispatcher";
 import { UserService, createUserRepository } from "./services/user-service";
 import { OidcService } from "./services/oidc-service";
 import { RoomCleanupService } from "./services/room-cleanup-service";
+import { ResourceCleanupService, ResourceService, createResourceRepository } from "./services/resource-service";
+import { LocalResourceStorage, S3ResourceStorage, type ResourceStorage } from "./services/resource-storage";
 
 export async function bootstrap(config: AppConfig) {
   registerModules();
@@ -24,6 +26,15 @@ export async function bootstrap(config: AppConfig) {
   const authSessionService = new AuthSessionService(redis, config.auth.sessionTtlSeconds);
   const userService = new UserService(createUserRepository(dataSource));
   const oidcService = new OidcService(config.auth, redis, userService);
+  const resourceStorage = createResourceStorage(config);
+  const resourceService = new ResourceService(
+    createResourceRepository(dataSource),
+    resourceStorage,
+    {
+      publicBaseUrl: config.server.publicBaseUrl,
+      uploadUrlTtlSeconds: config.resources.uploadUrlTtlSeconds,
+    },
+  );
   const roomService = new RoomService(
     createRoomRepository(dataSource),
     stateStore,
@@ -36,6 +47,10 @@ export async function bootstrap(config: AppConfig) {
     broadcastProvider,
     config.roomCleanup,
   );
+  const resourceCleanupService = new ResourceCleanupService(
+    resourceService,
+    config.resources.cleanupScanIntervalSeconds,
+  );
   const commandUrl = `${config.server.publicBaseUrl.replace(/^http/, "ws")}${config.server.wsPath}`;
 
   const app = createApp({
@@ -43,6 +58,7 @@ export async function bootstrap(config: AppConfig) {
     sessionService,
     stateStore,
     broadcastProvider,
+    resourceService,
     sockets: { commandUrl },
     auth: {
       oidcService,
@@ -61,9 +77,11 @@ export async function bootstrap(config: AppConfig) {
           sessionId: "system",
           roomId: meta.roomId,
           role: "host",
+          roomUserId: "user:system",
           userId: "system",
         },
         state,
+        send: async () => {},
         broadcast: async (event) => {
           await broadcastProvider.publishRoomEvent({
             roomId: meta.roomId,
@@ -82,6 +100,7 @@ export async function bootstrap(config: AppConfig) {
   }
 
   roomCleanupService.start();
+  resourceCleanupService.start();
 
   return {
     app,
@@ -89,5 +108,26 @@ export async function bootstrap(config: AppConfig) {
     port: config.server.port,
     dataSource,
     roomCleanupService,
+    resourceCleanupService,
   };
+}
+
+function createResourceStorage(config: AppConfig): ResourceStorage {
+  if (config.resources.provider === "s3") {
+    return new S3ResourceStorage({
+      region: config.resources.s3Region,
+      bucket: config.resources.s3Bucket,
+      endpoint: config.resources.s3Endpoint || undefined,
+      accessKeyId: config.resources.s3AccessKeyId,
+      secretAccessKey: config.resources.s3SecretAccessKey,
+      forcePathStyle: config.resources.s3ForcePathStyle,
+      publicBaseUrl: config.resources.s3PublicBaseUrl || undefined,
+    });
+  }
+
+  return new LocalResourceStorage({
+    publicBaseUrl: config.server.publicBaseUrl,
+    localDir: config.resources.localDir,
+    signingSecret: config.resources.localSigningSecret,
+  });
 }

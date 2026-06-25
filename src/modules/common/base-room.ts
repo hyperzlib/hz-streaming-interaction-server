@@ -1,5 +1,6 @@
-import { createRuleSet } from "../core/rule-set";
+import { createRuleSet } from "../../core/rule-set";
 import { z } from "zod";
+import type { Member } from "../../types";
 
 const roomClosedSchema = z.object({
   roomId: z.string(),
@@ -10,6 +11,7 @@ const roomClosedSchema = z.object({
 const userLifecycleSchema = z.object({
   sessionId: z.string(),
   role: z.enum(["host", "participant"]),
+  roomUserId: z.string(),
   userId: z.string().optional(),
 });
 
@@ -50,12 +52,19 @@ export const baseRoomRules = createRuleSet()
     await ctx.state.members.set(data.sessionId, {
       sessionId: data.sessionId,
       role: data.role,
+      roomUserId: data.roomUserId,
       userId: data.userId,
       joinedAt: existing?.joinedAt ?? now,
       lastSeenAt: now,
       presence: "online",
     });
     await next();
+    await ctx.send({
+      type: "sys:onlineMembers",
+      payload: {
+        members: onlineMembers(await ctx.state.members.all()),
+      },
+    });
     await ctx.broadcast({
       type: "sys:userJoin",
       payload: data,
@@ -86,3 +95,9 @@ export const baseRoomRules = createRuleSet()
       payload: data,
     });
   });
+
+function onlineMembers(members: Record<string, Member>): Member[] {
+  return Object.values(members)
+    .filter((member) => member.presence === "online")
+    .sort((left, right) => left.joinedAt - right.joinedAt || left.sessionId.localeCompare(right.sessionId));
+}

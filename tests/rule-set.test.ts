@@ -19,8 +19,10 @@ function context(): EventContext {
       sessionId: "session-1",
       roomId: "room-1",
       role: "host",
+      roomUserId: "user:owner",
     },
     state: new RoomStateStore(new MemoryRedisFacade()).forRoom("room-1"),
+    send: async () => {},
     broadcast: async () => {},
   };
 }

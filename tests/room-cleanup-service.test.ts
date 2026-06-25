@@ -63,6 +63,7 @@ describe("RoomCleanupService", () => {
         host: {
           sessionId: "host",
           role: "host",
+          roomUserId: "user:owner-1",
           userId: "owner-1",
           joinedAt: 0,
           lastSeenAt: 0,
@@ -71,6 +72,7 @@ describe("RoomCleanupService", () => {
         participant: {
           sessionId: "participant",
           role: "participant",
+          roomUserId: "user:user-1",
           userId: "user-1",
           joinedAt: 0,
           lastSeenAt: nowRef.value,
@@ -96,6 +98,7 @@ describe("RoomCleanupService", () => {
         host: {
           sessionId: "host",
           role: "host",
+          roomUserId: "user:owner-1",
           userId: "owner-1",
           joinedAt: 0,
           lastSeenAt: 0,
@@ -145,6 +148,7 @@ describe("RoomCleanupService", () => {
         host: {
           sessionId: "host",
           role: "host",
+          roomUserId: "user:owner-1",
           userId: "owner-1",
           joinedAt: nowRef.value,
           lastSeenAt: nowRef.value,

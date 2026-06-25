@@ -162,6 +162,7 @@ function makeSystemEventContext(
     sessionId: "system",
     roomId: roomMeta.roomId,
     role: "host",
+    roomUserId: "user:system",
     userId: "system",
   };
 
@@ -170,6 +171,7 @@ function makeSystemEventContext(
     roomMeta,
     session,
     state,
+    send: async () => {},
     broadcast: async (event: { type: string; payload: unknown }) => {
       await broadcastProvider.publishRoomEvent({
         roomId: roomMeta.roomId,

@@ -17,12 +17,13 @@ export const createRoomInputSchema = z.object({
 
 export const joinRoomInputSchema = z.object({
   roomId: z.string().min(1),
-  userId: z.string().min(1).optional(),
   password: z.string().min(1).optional(),
 });
 
 export type CreateRoomInput = z.infer<typeof createRoomInputSchema>;
-export type JoinRoomInput = z.infer<typeof joinRoomInputSchema>;
+export type JoinRoomInput = z.infer<typeof joinRoomInputSchema> & {
+  userId?: string;
+};
 
 export class RoomService {
   constructor(
@@ -55,6 +56,7 @@ export class RoomService {
     const { token } = await this.sessionService.createSession({
       roomId,
       role: "host",
+      roomUserId: roomUserIdForLoggedInUser(input.ownerId),
       userId: input.ownerId,
     });
 
@@ -77,6 +79,7 @@ export class RoomService {
     const { token } = await this.sessionService.createSession({
       roomId: meta.roomId,
       role: "participant",
+      roomUserId: input.userId ? roomUserIdForLoggedInUser(input.userId) : roomUserIdForTemporaryUser(),
       userId: input.userId,
     });
     return { token };
@@ -128,6 +131,14 @@ export class RoomService {
     await this.rooms.delete({ roomId });
     await this.stateStore.deleteRoomState(roomId);
   }
+}
+
+function roomUserIdForLoggedInUser(userId: string): string {
+  return `user:${userId}`;
+}
+
+function roomUserIdForTemporaryUser(): string {
+  return `temp:${crypto.randomUUID()}`;
 }
 
 export function createRoomRepository(dataSource: { getRepository: typeof import("typeorm").DataSource.prototype.getRepository }) {

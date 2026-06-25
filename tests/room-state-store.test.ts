@@ -6,6 +6,7 @@ import type { Member } from "../src/types";
 const host: Member = {
   sessionId: "host",
   role: "host",
+  roomUserId: "user:owner-1",
   userId: "owner-1",
   joinedAt: 1,
   lastSeenAt: 2,
@@ -15,6 +16,7 @@ const host: Member = {
 const participant: Member = {
   sessionId: "participant",
   role: "participant",
+  roomUserId: "user:user-1",
   userId: "user-1",
   joinedAt: 3,
   lastSeenAt: 4,

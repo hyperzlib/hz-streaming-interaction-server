@@ -3,6 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { toAppError } from "./errors";
 import { createAuthRoutes } from "./http/auth-routes";
+import { createResourceApi } from "./http/res-api";
 import { createRoomApi } from "./http/room-api";
 import { createCommandSocketApi, type CommandSocketDeps } from "./socket/command";
 import { RoomService } from "./services/room-service";
@@ -12,12 +13,14 @@ import { InProcessWsBroadcastProvider } from "./services/broadcast-provider";
 import { OidcService } from "./services/oidc-service";
 import { AuthSessionService } from "./services/auth-session-service";
 import { UserService } from "./services/user-service";
+import type { ResourceService } from "./services/resource-service";
 
 export type AppDeps = {
   roomService: RoomService;
   sessionService: SessionService;
   stateStore: RoomStateStore;
   broadcastProvider: InProcessWsBroadcastProvider;
+  resourceService?: ResourceService;
   sockets: {
     commandUrl: string;
   };
@@ -60,6 +63,7 @@ export function createApp(deps: AppDeps): Hono {
   }
 
   app.route("/", createRoomApi(deps));
+  app.route("/", createResourceApi(deps));
   app.route("/", createCommandSocketApi(deps));
 
   return app;

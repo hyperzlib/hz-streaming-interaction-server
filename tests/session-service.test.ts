@@ -10,6 +10,7 @@ describe("SessionService", () => {
     const { token, session } = await service.createSession({
       roomId: "room-1",
       role: "host",
+      roomUserId: "user:user-1",
       userId: "user-1",
     });
 
@@ -23,6 +24,7 @@ describe("SessionService", () => {
     const { token } = await service.createSession({
       roomId: "room-1",
       role: "participant",
+      roomUserId: "temp:anon-1",
     });
 
     await Bun.sleep(5);
