@@ -25,6 +25,6 @@ export const scoreRoomRules = createRuleSet()
     }),
   );
 
-export function registerModules(): void {
+export function registerScoreRoom(): void {
   RoomRegistry.register("score", scoreRoomRules);
 }

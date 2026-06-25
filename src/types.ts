@@ -14,6 +14,7 @@ export type Member = {
   sessionId: string;
   role: "host" | "participant";
   roomUserId: string;
+  roomUserName?: string;
   userId?: string;
   joinedAt: number;
   lastSeenAt: number;
@@ -40,6 +41,7 @@ export type Session = {
   roomId: string;
   role: "host" | "participant";
   roomUserId: string;
+  roomUserName?: string;
   userId?: string;
 };
 

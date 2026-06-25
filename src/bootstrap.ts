@@ -8,17 +8,16 @@ import { RoomService, createRoomRepository } from "./services/room-service";
 import { AuthSessionService } from "./services/auth-session-service";
 import { InProcessWsBroadcastProvider } from "./services/broadcast-provider";
 import { createApp } from "./app";
-import { registerModules } from "./modules/score-room";
+import { registerHangToLaRoom } from "./modules/hangtola-room";
 import { RoomDispatcher } from "./core/room-dispatcher";
 import { UserService, createUserRepository } from "./services/user-service";
 import { OidcService } from "./services/oidc-service";
 import { RoomCleanupService } from "./services/room-cleanup-service";
 import { ResourceCleanupService, ResourceService, createResourceRepository } from "./services/resource-service";
 import { LocalResourceStorage, S3ResourceStorage, type ResourceStorage } from "./services/resource-storage";
+import { registerScoreRoom } from "./modules/score-room";
 
 export async function bootstrap(config: AppConfig) {
-  registerModules();
-
   const dataSource: DataSource = await createDataSource(config).initialize();
   const redis = new BunRedisFacade(config.redis.url, config.redis.keyPrefix);
   const stateStore = new RoomStateStore(redis);
@@ -35,6 +34,10 @@ export async function bootstrap(config: AppConfig) {
       uploadUrlTtlSeconds: config.resources.uploadUrlTtlSeconds,
     },
   );
+
+  registerHangToLaRoom(resourceService);
+  registerScoreRoom();
+  
   const roomService = new RoomService(
     createRoomRepository(dataSource),
     stateStore,

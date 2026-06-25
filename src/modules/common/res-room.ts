@@ -8,8 +8,6 @@ export type ResReplaceScope = ResResourceScope;
 
 export type ResRoomOptions = {
   resourceScope?: ResResourceScope;
-  /** @deprecated Use resourceScope instead. */
-  replaceScope?: ResResourceScope;
   publicVisible?: boolean;
   maxTtlSeconds?: number;
   allowInfiniteTtl?: boolean;
@@ -49,7 +47,7 @@ const deleteResourceSchema = z.object({
 });
 
 export function createResRoom(resourceService: ResourceService, opts: ResRoomOptions = {}) {
-  const resourceScope = opts.resourceScope ?? opts.replaceScope ?? "user";
+  const resourceScope = opts.resourceScope ?? "user";
   const publicVisible = opts.publicVisible ?? false;
   const maxTtlSeconds = opts.maxTtlSeconds ?? DEFAULT_MAX_TTL_SECONDS;
 

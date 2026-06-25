@@ -9,12 +9,21 @@ export type RuleHandler = (
 export type RuleSet = {
   on(eventType: string, handler: RuleHandler): RuleSet;
   use(other: RuleSet): RuleSet;
+  enableTempUserName(value: boolean): RuleSet;
+  options(): RuleSetOptions;
   get(eventType: string): RuleHandler[];
   entries(): IterableIterator<[string, RuleHandler[]]>;
 };
 
+export type RuleSetOptions = {
+  tempUserNameEnabled: boolean;
+};
+
 export function createRuleSet(): RuleSet {
   const rules = new Map<string, RuleHandler[]>();
+  const options: RuleSetOptions = {
+    tempUserNameEnabled: false,
+  };
 
   return {
     on(eventType, handler) {
@@ -32,6 +41,13 @@ export function createRuleSet(): RuleSet {
         rules.get(eventType)!.push(...handlers);
       }
       return this;
+    },
+    enableTempUserName(value) {
+      options.tempUserNameEnabled = value;
+      return this;
+    },
+    options() {
+      return { ...options };
     },
     get(eventType) {
       return rules.get(eventType) ?? [];

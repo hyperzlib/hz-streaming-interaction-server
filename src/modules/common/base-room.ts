@@ -12,6 +12,7 @@ const userLifecycleSchema = z.object({
   sessionId: z.string(),
   role: z.enum(["host", "participant"]),
   roomUserId: z.string(),
+  roomUserName: z.string().optional(),
   userId: z.string().optional(),
 });
 
@@ -53,6 +54,7 @@ export const baseRoomRules = createRuleSet()
       sessionId: data.sessionId,
       role: data.role,
       roomUserId: data.roomUserId,
+      roomUserName: data.roomUserName,
       userId: data.userId,
       joinedAt: existing?.joinedAt ?? now,
       lastSeenAt: now,

@@ -26,16 +26,18 @@ export function createCommandSocketApi(deps: CommandSocketDeps): Hono {
   const app = new Hono();
   const activeSessionConnections = new Map<string, number>();
   const leaveTimers = new Map<string, Timer>();
+  const sessionSockets = new Map<string, Set<WSContext<any>>>();
 
   app.get(
     "/ws/command",
     upgradeWebSocket((c) => {
       let joinedRoomId: string | null = null;
       let session: Session | null = null;
+      let token: string | null = null;
 
       return {
         async onOpen(_event, ws) {
-          const token = readBearerOrQueryToken(c);
+          token = readBearerOrQueryToken(c);
           if (!token) {
             ws.close(1008, "Missing token");
             return;
@@ -51,6 +53,7 @@ export function createCommandSocketApi(deps: CommandSocketDeps): Hono {
           joinedRoomId = session.roomId;
           deps.broadcastProvider.addSocket(joinedRoomId, ws);
           markSessionConnected(activeSessionConnections, leaveTimers, session);
+          addSessionSocket(sessionSockets, session.sessionId, ws);
           const state = deps.stateStore.forRoom(session.roomId);
           await RoomDispatcher.of(meta.roomType).dispatch(
             makeEventContext(deps, session, meta, state, ws),
@@ -70,6 +73,12 @@ export function createCommandSocketApi(deps: CommandSocketDeps): Hono {
 
           let commandId: string | undefined;
           try {
+            if (!token || !await isTokenStillValid(deps, token, session)) {
+              ws.send(JSON.stringify({ ok: false, error: { code: "UNAUTHORIZED", message: "Invalid token" } }));
+              ws.close(1008, "Invalid token");
+              return;
+            }
+
             const raw = await webSocketDataToString(event.data);
             const command = clientCommandSchema.parse(JSON.parse(raw));
             commandId = command.id;
@@ -81,6 +90,12 @@ export function createCommandSocketApi(deps: CommandSocketDeps): Hono {
             const meta = await deps.roomService.getRoomMeta(command.roomId);
             if (meta.closedAt) {
               throw new AppError("ROOM_CLOSED", "Room is closed", 410);
+            }
+
+            if (command.type === "room:kick") {
+              await handleKickCommand(deps, sessionSockets, session, command.payload);
+              ws.send(JSON.stringify({ id: command.id, ok: true }));
+              return;
             }
 
             const state = deps.stateStore.forRoom(command.roomId);
@@ -111,7 +126,11 @@ export function createCommandSocketApi(deps: CommandSocketDeps): Hono {
           }
 
           deps.broadcastProvider.removeSocket(joinedRoomId, ws);
+          removeSessionSocket(sessionSockets, session.sessionId, ws);
           if (!markSessionDisconnected(activeSessionConnections, session)) {
+            return;
+          }
+          if (token && !await isTokenStillValid(deps, token, session)) {
             return;
           }
 
@@ -123,6 +142,81 @@ export function createCommandSocketApi(deps: CommandSocketDeps): Hono {
   );
 
   return app;
+}
+
+const kickPayloadSchema = z.object({
+  sessionId: z.string().min(1),
+});
+
+async function handleKickCommand(
+  deps: CommandSocketDeps,
+  sessionSockets: Map<string, Set<WSContext<any>>>,
+  actor: Session,
+  payload: unknown,
+): Promise<void> {
+  if (actor.role !== "host") {
+    throw new AppError("FORBIDDEN", "Only host can kick room users", 403);
+  }
+
+  const data = kickPayloadSchema.parse(payload);
+  const payloadOut = await deps.roomService.kickSession(actor, data.sessionId);
+
+  await deps.broadcastProvider.publishRoomEvent({
+    roomId: actor.roomId,
+    type: "sys:userKicked",
+    payload: payloadOut,
+  });
+
+  const sockets = sessionSockets.get(payloadOut.sessionId);
+  if (!sockets) {
+    return;
+  }
+  for (const targetWs of [...sockets]) {
+    try {
+      targetWs.send(JSON.stringify({
+        type: "sys:kicked",
+        payload: payloadOut,
+      }));
+      targetWs.close(1008, "Kicked");
+    } catch {
+      // Socket cleanup also happens through onClose.
+    }
+  }
+}
+
+async function isTokenStillValid(
+  deps: CommandSocketDeps,
+  token: string,
+  session: Session,
+): Promise<boolean> {
+  const current = await deps.sessionService.getSession(token);
+  return current?.sessionId === session.sessionId && current.roomId === session.roomId;
+}
+
+function addSessionSocket(
+  sessionSockets: Map<string, Set<WSContext<any>>>,
+  sessionId: string,
+  ws: WSContext<any>,
+): void {
+  if (!sessionSockets.has(sessionId)) {
+    sessionSockets.set(sessionId, new Set());
+  }
+  sessionSockets.get(sessionId)!.add(ws);
+}
+
+function removeSessionSocket(
+  sessionSockets: Map<string, Set<WSContext<any>>>,
+  sessionId: string,
+  ws: WSContext<any>,
+): void {
+  const sockets = sessionSockets.get(sessionId);
+  if (!sockets) {
+    return;
+  }
+  sockets.delete(ws);
+  if (!sockets.size) {
+    sessionSockets.delete(sessionId);
+  }
 }
 
 function markSessionConnected(

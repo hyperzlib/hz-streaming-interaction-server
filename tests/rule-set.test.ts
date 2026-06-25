@@ -28,6 +28,16 @@ function context(): EventContext {
 }
 
 describe("RuleSet and EventPipeline", () => {
+  test("stores temp user name option without merging used rule set options", async () => {
+    const base = createRuleSet().enableTempUserName(true);
+    const combined = createRuleSet().use(base);
+
+    expect(base.options()).toEqual({ tempUserNameEnabled: true });
+    expect(combined.options()).toEqual({ tempUserNameEnabled: false });
+    expect(combined.enableTempUserName(true)).toBe(combined);
+    expect(combined.options()).toEqual({ tempUserNameEnabled: true });
+  });
+
   test("use appends handlers in registration order", async () => {
     const calls: string[] = [];
     const first = createRuleSet().on("event", async (_ctx, _payload, next) => {

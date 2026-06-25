@@ -1,9 +1,10 @@
+import { createHash } from "node:crypto";
 import argon2 from "argon2";
 import type { Repository } from "typeorm";
 import { z } from "zod";
 import { AppError } from "../errors";
 import { RoomRegistry } from "../core/room-registry";
-import type { RoomCloseReason, RoomMeta, RoomStateSnapshot } from "../types";
+import type { RoomCloseReason, RoomMeta, RoomStateSnapshot, Session } from "../types";
 import { RoomMetaEntity } from "../storage/room-meta.entity";
 import type { RoomStateStore } from "../storage/room-state-store";
 import type { SessionService } from "./session-service";
@@ -18,12 +19,22 @@ export const createRoomInputSchema = z.object({
 export const joinRoomInputSchema = z.object({
   roomId: z.string().min(1),
   password: z.string().min(1).optional(),
+  roomUserName: z.string().optional(),
 });
 
 export type CreateRoomInput = z.infer<typeof createRoomInputSchema>;
 export type JoinRoomInput = z.infer<typeof joinRoomInputSchema> & {
   userId?: string;
 };
+
+export type KickedSessionPayload = {
+  sessionId: string;
+  roomUserId: string;
+  roomUserName?: string;
+  userId?: string;
+};
+
+const MAX_TEMP_USER_NAME_LENGTH = 32;
 
 export class RoomService {
   constructor(
@@ -76,13 +87,49 @@ export class RoomService {
       }
     }
 
+    const roomUserIdentity = await this.resolveJoinRoomUserIdentity(meta, input);
     const { token } = await this.sessionService.createSession({
       roomId: meta.roomId,
       role: "participant",
-      roomUserId: input.userId ? roomUserIdForLoggedInUser(input.userId) : roomUserIdForTemporaryUser(),
+      roomUserId: roomUserIdentity.roomUserId,
+      roomUserName: roomUserIdentity.roomUserName,
       userId: input.userId,
     });
     return { token };
+  }
+
+  private async resolveJoinRoomUserIdentity(
+    meta: RoomMeta,
+    input: JoinRoomInput,
+  ): Promise<{ roomUserId: string; roomUserName?: string }> {
+    if (input.userId) {
+      return {
+        roomUserId: roomUserIdForLoggedInUser(input.userId),
+      };
+    }
+
+    const ruleSet = RoomRegistry.get(meta.roomType);
+    if (!ruleSet.options().tempUserNameEnabled) {
+      return {
+        roomUserId: roomUserIdForTemporaryUser(),
+      };
+    }
+
+    if (!meta.passwordHash) {
+      throw new AppError("TEMP_USER_NAME_REQUIRES_PASSWORD", "Temporary user names require a room password", 400);
+    }
+
+    const roomUserName = normalizeTempUserName(input.roomUserName);
+    const roomUserId = roomUserIdForTemporaryUserName(meta.roomId, roomUserName);
+    const activeSessions = await this.sessionService.getRoomSessions(meta.roomId);
+    if (activeSessions.some((session) => session.roomUserId === roomUserId)) {
+      throw new AppError("ROOM_USER_NAME_TAKEN", "Room user name is already taken", 409);
+    }
+
+    return {
+      roomUserId,
+      roomUserName,
+    };
   }
 
   async getRoomMeta(roomId: string): Promise<RoomMeta> {
@@ -131,6 +178,28 @@ export class RoomService {
     await this.rooms.delete({ roomId });
     await this.stateStore.deleteRoomState(roomId);
   }
+
+  async kickSession(actor: Session, targetSessionId: string): Promise<KickedSessionPayload> {
+    if (actor.role !== "host") {
+      throw new AppError("FORBIDDEN", "Only host can kick room users", 403);
+    }
+    if (targetSessionId === actor.sessionId) {
+      throw new AppError("CANNOT_KICK_SELF", "Host cannot kick self", 400);
+    }
+
+    const target = await this.sessionService.deleteRoomSession(actor.roomId, targetSessionId);
+    if (!target || target.roomId !== actor.roomId) {
+      throw new AppError("SESSION_NOT_FOUND", "Session not found", 404);
+    }
+
+    await this.stateStore.forRoom(actor.roomId).members.delete(target.sessionId);
+    return {
+      sessionId: target.sessionId,
+      roomUserId: target.roomUserId,
+      roomUserName: target.roomUserName,
+      userId: target.userId,
+    };
+  }
 }
 
 function roomUserIdForLoggedInUser(userId: string): string {
@@ -139,6 +208,24 @@ function roomUserIdForLoggedInUser(userId: string): string {
 
 function roomUserIdForTemporaryUser(): string {
   return `temp:${crypto.randomUUID()}`;
+}
+
+function normalizeTempUserName(value: string | undefined): string {
+  const normalized = value?.trim().replace(/\s+/g, " ") ?? "";
+  if (!normalized) {
+    throw new AppError("ROOM_USER_NAME_REQUIRED", "Room user name is required", 400);
+  }
+  if (normalized.length > MAX_TEMP_USER_NAME_LENGTH) {
+    throw new AppError("ROOM_USER_NAME_TOO_LONG", "Room user name is too long", 400);
+  }
+  return normalized;
+}
+
+function roomUserIdForTemporaryUserName(roomId: string, roomUserName: string): string {
+  const hash = createHash("sha256")
+    .update(`${roomId}\0${roomUserName}`)
+    .digest("hex");
+  return `temp:${hash}`;
 }
 
 export function createRoomRepository(dataSource: { getRepository: typeof import("typeorm").DataSource.prototype.getRepository }) {

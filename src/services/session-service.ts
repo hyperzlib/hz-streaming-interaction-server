@@ -14,6 +14,7 @@ export class SessionService {
       sessionId: crypto.randomUUID(),
     };
     await this.redis.setJson(this.sessionKey(token), session, this.ttlSeconds);
+    await this.redis.hSetJson(this.roomSessionsKey(session.roomId), session.sessionId, token);
     return { token, session };
   }
 
@@ -22,7 +23,37 @@ export class SessionService {
   }
 
   async deleteSession(token: string): Promise<void> {
+    const session = await this.getSession(token);
     await this.redis.delete(this.sessionKey(token));
+    if (session) {
+      await this.redis.hDel(this.roomSessionsKey(session.roomId), session.sessionId);
+    }
+  }
+
+  async getRoomSessions(roomId: string): Promise<Session[]> {
+    const indexed = await this.redis.hGetAllJson<string>(this.roomSessionsKey(roomId));
+    const sessions: Session[] = [];
+    for (const [sessionId, token] of Object.entries(indexed)) {
+      const session = await this.getSession(token);
+      if (!session || session.roomId !== roomId || session.sessionId !== sessionId) {
+        await this.redis.hDel(this.roomSessionsKey(roomId), sessionId);
+        continue;
+      }
+      sessions.push(session);
+    }
+    return sessions;
+  }
+
+  async deleteRoomSession(roomId: string, sessionId: string): Promise<Session | null> {
+    const token = await this.redis.hGetJson<string>(this.roomSessionsKey(roomId), sessionId);
+    if (!token) {
+      return null;
+    }
+
+    const session = await this.getSession(token);
+    await this.redis.delete(this.sessionKey(token));
+    await this.redis.hDel(this.roomSessionsKey(roomId), sessionId);
+    return session;
   }
 
   private createToken(): string {
@@ -32,5 +63,9 @@ export class SessionService {
 
   private sessionKey(token: string): string {
     return `session:${token}`;
+  }
+
+  private roomSessionsKey(roomId: string): string {
+    return `room:${roomId}:sessions`;
   }
 }

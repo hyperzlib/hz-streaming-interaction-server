@@ -63,6 +63,7 @@ describe("baseRoomRules", () => {
       sessionId: "joining",
       role: "participant",
       roomUserId: "user:user-3",
+      roomUserName: "User 3",
       userId: "user-3",
     });
 
@@ -72,7 +73,7 @@ describe("baseRoomRules", () => {
         payload: {
           members: [
             expect.objectContaining({ sessionId: "already-online", presence: "online" }),
-            expect.objectContaining({ sessionId: "joining", presence: "online" }),
+            expect.objectContaining({ sessionId: "joining", roomUserName: "User 3", presence: "online" }),
           ],
         },
       },
