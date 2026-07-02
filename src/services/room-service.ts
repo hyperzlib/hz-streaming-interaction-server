@@ -15,6 +15,7 @@ export const createRoomInputSchema = z.object({
   ownerId: z.string().min(1),
   isPublicRead: z.boolean().optional().default(false),
   password: z.string().min(1).optional(),
+  roomUserName: z.string().optional(),
 });
 
 export const joinRoomInputSchema = z.object({
@@ -80,6 +81,7 @@ export class RoomService {
       roomId,
       role: "host",
       roomUserId: roomUserIdForLoggedInUser(input.ownerId),
+      roomUserName: input.roomUserName,
       userId: input.ownerId,
     });
 
@@ -125,10 +127,6 @@ export class RoomService {
       return {
         roomUserId: roomUserIdForTemporaryUser(),
       };
-    }
-
-    if (!meta.passwordHash) {
-      throw new AppError("TEMP_USER_NAME_REQUIRES_PASSWORD", "Temporary user names require a room password", 400);
     }
 
     const roomUserName = normalizeTempUserName(input.roomUserName);

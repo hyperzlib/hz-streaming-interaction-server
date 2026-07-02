@@ -43,6 +43,7 @@ export function createRoomApi(deps: AppDeps): Hono {
     const result = await deps.roomService.createRoom({
       ...input,
       ownerId: user.id,
+      roomUserName: input.roomUserName ?? user.displayName,
     });
     return c.json({
       ...result,
