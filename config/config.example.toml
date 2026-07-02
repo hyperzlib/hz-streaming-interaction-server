@@ -40,6 +40,9 @@ s3SecretAccessKey = ""
 s3ForcePathStyle = false
 s3PublicBaseUrl = ""
 
+[frontend]
+allowedOrigins = ["http://localhost:5173"]
+
 [auth]
 enabled = false
 issuer = "https://idp.example.com/"

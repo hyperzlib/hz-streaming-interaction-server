@@ -16,7 +16,7 @@ export function createAuthRoutes(deps: AppDeps): Hono {
     const query = loginQuerySchema.parse(c.req.query());
     const loginUrl = await deps.auth!.oidcService.createLoginUrl({
       callbackMode: query.callbackMode,
-      redirectUrl: sanitizeRedirectUrl(query.redirectUrl),
+      redirectUrl: sanitizeRedirectUrl(query.redirectUrl, deps.frontend.allowedOrigins),
     });
     c.header("Cache-Control", "no-store");
     c.header("Pragma", "no-cache");
@@ -35,7 +35,7 @@ export function createAuthRoutes(deps: AppDeps): Hono {
       return c.html(renderIframeCallback(token));
     }
 
-    const redirectUrl = sanitizeRedirectUrl(result.loginState.redirectUrl) ?? "/";
+    const redirectUrl = sanitizeRedirectUrl(result.loginState.redirectUrl, deps.frontend.allowedOrigins) ?? "/";
     const url = new URL(redirectUrl, "http://localhost");
     url.searchParams.set("token", token);
     return c.redirect(`${url.pathname}${url.search}${url.hash}`);
@@ -87,12 +87,22 @@ export function createAuthRoutes(deps: AppDeps): Hono {
   return app;
 }
 
-function sanitizeRedirectUrl(url: string | undefined): string | undefined {
+function sanitizeRedirectUrl(url: string | undefined, allowedOrigins: string[]): string | undefined {
   if (!url) {
     return undefined;
   }
+  // Relative paths (e.g. /dashboard)
   if (url.startsWith("/") && !url.startsWith("//") && !url.includes("\\\\")) {
     return url;
+  }
+  // Absolute URLs must match an allowed origin
+  try {
+    const parsed = new URL(url);
+    if (allowedOrigins.includes(parsed.origin)) {
+      return url;
+    }
+  } catch {
+    // Invalid URL → rejected below
   }
   return undefined;
 }
@@ -105,6 +115,25 @@ function renderIframeCallback(token: string): string {
 <body>
 <script>
 window.parent && window.parent.postMessage(${payload}, window.location.origin);
+</script>
+</body>
+</html>`;
+}
+
+function renderRedirectCallback(token: string, redirectUrl: string): string {
+  const localStorageKey = "livetoolboxUserToken";
+
+  // 同时把 token 添加到 localStorage 和 URL 参数中
+  let redirectUri = new URL(redirectUrl, "http://localhost");
+  redirectUri.searchParams.set("token", token);
+
+  return `<!doctype html>
+<html>
+<head><meta charset="utf-8" /></head>
+<body>
+<script>
+localStorage.setItem(${JSON.stringify(localStorageKey)}, ${JSON.stringify(token)});
+window.location.href = ${JSON.stringify(redirectUri.toString())};
 </script>
 </body>
 </html>`;

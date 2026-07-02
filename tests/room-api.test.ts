@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { DataSource } from "typeorm";
 import { createApp } from "../src/app";
 import { RoomRegistry } from "../src/core/room-registry";
-import { registerModules } from "../src/modules/score-room";
+import { registerScoreRoom } from "../src/modules/score-room";
 import { InProcessWsBroadcastProvider } from "../src/services/broadcast-provider";
 import { AuthSessionService } from "../src/services/auth-session-service";
-import { RoomService, createRoomRepository } from "../src/services/room-service";
+import { createRoomRepository, RoomService } from "../src/services/room-service";
 import { SessionService } from "../src/services/session-service";
 import { createUserRepository, UserService } from "../src/services/user-service";
 import { createBunSqliteConnection } from "../src/storage/bun-sqlite-better-sqlite3";
@@ -13,6 +13,10 @@ import { MemoryRedisFacade } from "../src/storage/redis-facade";
 import { RoomMetaEntity } from "../src/storage/room-meta.entity";
 import { RoomStateStore } from "../src/storage/room-state-store";
 import { UserEntity } from "../src/storage/user.entity";
+
+// ---------------------------------------------------------------------------
+// Harness
+// ---------------------------------------------------------------------------
 
 async function createApiHarness() {
   const dataSource = await new DataSource({
@@ -40,6 +44,7 @@ async function createApiHarness() {
       authSessionService,
       userService,
     },
+    frontend: { allowedOrigins: [] },
   });
 
   return {
@@ -53,117 +58,598 @@ async function createApiHarness() {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+async function createAuthToken(userService: UserService, authSessionService: AuthSessionService, userId: string, displayName = "Test User") {
+  await userService.upsertOidcUser({ id: userId, displayName, avatarUrl: null, email: null });
+  return await authSessionService.createSession(userId);
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 describe("Room API", () => {
   beforeEach(() => {
     RoomRegistry.clear();
-    registerModules();
+    registerScoreRoom();
   });
 
-  test("manual close broadcasts sys:roomClosed instead of sys:willShutdown", async () => {
-    const { app, dataSource, roomService, broadcastProvider } = await createApiHarness();
-    const { roomId, token } = await roomService.createRoom({
-      roomType: "score",
-      ownerId: "owner-1",
-      isPublicRead: false,
-    });
-    const messages: string[] = [];
-    broadcastProvider.addSocket(roomId, { send: (data) => messages.push(data) });
+  // -- GET /rooms/:id/info --------------------------------------------------
 
-    const response = await app.fetch(new Request(`http://localhost/rooms/${roomId}/close`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${token}`,
-      },
-    }));
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true });
-    const events = messages.map((message) => JSON.parse(message));
-    expect(events.map((event) => event.type)).toEqual(["sys:roomClosed"]);
-    expect(events[0].payload).toMatchObject({
-      roomId,
-      reason: "manual",
-    });
-    expect(typeof events[0].payload.closedAt).toBe("number");
-    expect((await roomService.getRoomMeta(roomId)).closedReason).toBe("manual");
-
-    await dataSource.destroy();
-  });
-
-  test("create room uses authenticated user as owner and session user", async () => {
-    const { app, authSessionService, dataSource, roomService, sessionService, userService } = await createApiHarness();
-    await userService.upsertOidcUser({
-      id: "login-user",
-      displayName: "Login User",
-      avatarUrl: null,
-      email: null,
-    });
-    const authToken = await authSessionService.createSession("login-user");
-
-    const response = await app.fetch(new Request("http://localhost/rooms/create", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${authToken}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
+  describe("GET /rooms/:id/info", () => {
+    test("returns public info for an open room", async () => {
+      const { app, dataSource, roomService } = await createApiHarness();
+      const { roomId } = await roomService.createRoom({
         roomType: "score",
-        ownerId: "spoofed-owner",
-        isPublicRead: true,
-      }),
-    }));
+        ownerId: "owner-1",
+        isPublicRead: false,
+      });
 
-    expect(response.status).toBe(200);
-    const body = await response.json() as { roomId: string; token: string };
-    const meta = await roomService.getRoomMeta(body.roomId);
-    const session = await sessionService.getSession(body.token);
-    expect(meta.ownerId).toBe("login-user");
-    expect(session?.userId).toBe("login-user");
-    expect(session?.roomUserId).toBe("user:login-user");
+      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/info`));
 
-    await dataSource.destroy();
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toMatchObject({
+        roomId,
+        roomType: "score",
+        hasPassword: false,
+        isClosed: false,
+      });
+      expect(typeof body.createdAt).toBe("number");
+
+      await dataSource.destroy();
+    });
+
+    test("returns info for a password-protected room", async () => {
+      const { app, dataSource, roomService } = await createApiHarness();
+      const { roomId } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+        password: "secret",
+      });
+
+      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/info`));
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ hasPassword: true, isClosed: false });
+
+      await dataSource.destroy();
+    });
+
+    test("marks a closed room", async () => {
+      const { app, dataSource, roomService } = await createApiHarness();
+      const { roomId } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+      });
+      await roomService.closeRoom(roomId, "manual");
+
+      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/info`));
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ isClosed: true });
+
+      await dataSource.destroy();
+    });
+
+    test("returns 404 for unknown room", async () => {
+      const { app, dataSource } = await createApiHarness();
+
+      const res = await app.fetch(new Request("http://localhost/rooms/unknown-room/info"));
+
+      expect(res.status).toBe(404);
+      const body = await res.json();
+      expect(body.error.code).toBe("ROOM_NOT_FOUND");
+
+      await dataSource.destroy();
+    });
   });
 
-  test("join room ignores body user id and uses auth or temporary room user id", async () => {
-    const { app, authSessionService, dataSource, roomService, sessionService, userService } = await createApiHarness();
-    const { roomId } = await roomService.createRoom({
-      roomType: "score",
-      ownerId: "owner-1",
-      isPublicRead: false,
+  // -- POST /rooms/create ---------------------------------------------------
+
+  describe("POST /rooms/create", () => {
+    test("creates a room with authenticated user as owner", async () => {
+      const { app, authSessionService, dataSource, roomService, userService } = await createApiHarness();
+      const authToken = await createAuthToken(userService, authSessionService, "login-user");
+
+      const res = await app.fetch(new Request("http://localhost/rooms/create", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${authToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ roomType: "score", isPublicRead: true }),
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json() as { roomId: string; token: string; sockets: { commandUrl: string } };
+      expect(body.roomId).toBeTruthy();
+      expect(body.token).toBeTruthy();
+      expect(body.sockets.commandUrl).toBe("ws://localhost/ws/command");
+
+      const meta = await roomService.getRoomMeta(body.roomId);
+      expect(meta.ownerId).toBe("login-user");
+      expect(meta.isPublicRead).toBe(true);
+
+      await dataSource.destroy();
     });
-    await userService.upsertOidcUser({
-      id: "login-user",
-      displayName: "Login User",
-      avatarUrl: null,
-      email: null,
+
+    test("ignores a spoofed ownerId from the request body", async () => {
+      const { app, authSessionService, dataSource, roomService, userService } = await createApiHarness();
+      const authToken = await createAuthToken(userService, authSessionService, "login-user");
+
+      const res = await app.fetch(new Request("http://localhost/rooms/create", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${authToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          roomType: "score",
+          ownerId: "spoofed-owner",
+          isPublicRead: true,
+        }),
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json() as { roomId: string };
+      const meta = await roomService.getRoomMeta(body.roomId);
+      expect(meta.ownerId).toBe("login-user");
+
+      await dataSource.destroy();
     });
-    const authToken = await authSessionService.createSession("login-user");
 
-    const authedResponse = await app.fetch(new Request("http://localhost/rooms/join", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${authToken}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ roomId, userId: "spoofed-user" }),
-    }));
-    expect(authedResponse.status).toBe(200);
-    const authedBody = await authedResponse.json() as { token: string };
-    const authedSession = await sessionService.getSession(authedBody.token);
-    expect(authedSession?.userId).toBe("login-user");
-    expect(authedSession?.roomUserId).toBe("user:login-user");
+    test("returns 401 when no auth token is provided", async () => {
+      const { app, dataSource } = await createApiHarness();
 
-    const anonymousResponse = await app.fetch(new Request("http://localhost/rooms/join", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ roomId, userId: "spoofed-user" }),
-    }));
-    expect(anonymousResponse.status).toBe(200);
-    const anonymousBody = await anonymousResponse.json() as { token: string };
-    const anonymousSession = await sessionService.getSession(anonymousBody.token);
-    expect(anonymousSession?.userId).toBeUndefined();
-    expect(anonymousSession?.roomUserId.startsWith("temp:")).toBe(true);
+      const res = await app.fetch(new Request("http://localhost/rooms/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ roomType: "score", isPublicRead: true }),
+      }));
 
-    await dataSource.destroy();
+      expect(res.status).toBe(401);
+      expect((await res.json()).error.code).toBe("UNAUTHORIZED");
+
+      await dataSource.destroy();
+    });
+
+    test("returns 400 for unknown room type", async () => {
+      const { app, authSessionService, dataSource, userService } = await createApiHarness();
+      const authToken = await createAuthToken(userService, authSessionService, "login-user");
+
+      const res = await app.fetch(new Request("http://localhost/rooms/create", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${authToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ roomType: "nonexistent" }),
+      }));
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("UNKNOWN_ROOM_TYPE");
+
+      await dataSource.destroy();
+    });
+
+    test("returns validation error for missing roomType", async () => {
+      const { app, authSessionService, dataSource, userService } = await createApiHarness();
+      const authToken = await createAuthToken(userService, authSessionService, "login-user");
+
+      const res = await app.fetch(new Request("http://localhost/rooms/create", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${authToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }));
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("VALIDATION_ERROR");
+
+      await dataSource.destroy();
+    });
+  });
+
+  // -- POST /rooms/join -----------------------------------------------------
+
+  describe("POST /rooms/join", () => {
+    test("joins with authenticated user id ignoring spoofed userId", async () => {
+      const { app, authSessionService, dataSource, roomService, sessionService, userService } = await createApiHarness();
+      const { roomId } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+      });
+      const authToken = await createAuthToken(userService, authSessionService, "login-user");
+
+      const res = await app.fetch(new Request("http://localhost/rooms/join", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${authToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ roomId, userId: "spoofed-user" }),
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json() as { token: string };
+      const session = await sessionService.getSession(body.token);
+      expect(session?.userId).toBe("login-user");
+      expect(session?.roomUserId).toBe("user:login-user");
+
+      await dataSource.destroy();
+    });
+
+    test("joins anonymously with temp room user id when not authenticated", async () => {
+      const { app, dataSource, roomService, sessionService } = await createApiHarness();
+      const { roomId } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+      });
+
+      const res = await app.fetch(new Request("http://localhost/rooms/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ roomId, userId: "spoofed-user" }),
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json() as { token: string };
+      const session = await sessionService.getSession(body.token);
+      expect(session?.userId).toBeUndefined();
+      expect(session?.roomUserId.startsWith("temp:")).toBe(true);
+      expect(session?.role).toBe("participant");
+
+      await dataSource.destroy();
+    });
+
+    test("joins with correct password", async () => {
+      const { app, dataSource, roomService, sessionService } = await createApiHarness();
+      const { roomId } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+        password: "secret",
+      });
+
+      const res = await app.fetch(new Request("http://localhost/rooms/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ roomId, password: "secret" }),
+      }));
+
+      expect(res.status).toBe(200);
+      expect((await sessionService.getSession((await res.json()).token))).toBeTruthy();
+
+      await dataSource.destroy();
+    });
+
+    test("returns 401 for wrong password", async () => {
+      const { app, dataSource, roomService } = await createApiHarness();
+      const { roomId } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+        password: "secret",
+      });
+
+      const res = await app.fetch(new Request("http://localhost/rooms/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ roomId, password: "wrong" }),
+      }));
+
+      expect(res.status).toBe(401);
+      expect((await res.json()).error.code).toBe("INVALID_ROOM_PASSWORD");
+
+      await dataSource.destroy();
+    });
+
+    test("returns 410 when joining a closed room", async () => {
+      const { app, dataSource, roomService } = await createApiHarness();
+      const { roomId } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+      });
+      await roomService.closeRoom(roomId, "manual");
+
+      const res = await app.fetch(new Request("http://localhost/rooms/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ roomId }),
+      }));
+
+      expect(res.status).toBe(410);
+      expect((await res.json()).error.code).toBe("ROOM_CLOSED");
+
+      await dataSource.destroy();
+    });
+
+    test("returns 404 for unknown room", async () => {
+      const { app, dataSource } = await createApiHarness();
+
+      const res = await app.fetch(new Request("http://localhost/rooms/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ roomId: "nonexistent" }),
+      }));
+
+      expect(res.status).toBe(404);
+      expect((await res.json()).error.code).toBe("ROOM_NOT_FOUND");
+
+      await dataSource.destroy();
+    });
+
+    test("includes sockets info in the response", async () => {
+      const { app, dataSource, roomService } = await createApiHarness();
+      const { roomId } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+      });
+
+      const res = await app.fetch(new Request("http://localhost/rooms/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ roomId }),
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.sockets).toEqual({ commandUrl: "ws://localhost/ws/command" });
+
+      await dataSource.destroy();
+    });
+  });
+
+  // -- GET /rooms/:id/snapshot ----------------------------------------------
+
+  describe("GET /rooms/:id/snapshot", () => {
+    test("returns full snapshot for a public-read room without token", async () => {
+      const { app, dataSource, roomService } = await createApiHarness();
+      const { roomId } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: true,
+      });
+
+      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/snapshot`));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.meta).toMatchObject({ roomId, roomType: "score", isPublicRead: true });
+      expect(body.state).toEqual({ members: {} });
+
+      await dataSource.destroy();
+    });
+
+    test("returns 401 for private room without token", async () => {
+      const { app, dataSource, roomService } = await createApiHarness();
+      const { roomId } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+      });
+
+      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/snapshot`));
+
+      expect(res.status).toBe(401);
+      expect((await res.json()).error.code).toBe("UNAUTHORIZED");
+
+      await dataSource.destroy();
+    });
+
+    test("returns snapshot for private room with valid session token", async () => {
+      const { app, dataSource, roomService } = await createApiHarness();
+      const { roomId, token } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+      });
+
+      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/snapshot`, {
+        headers: { authorization: `Bearer ${token}` },
+      }));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.meta).toMatchObject({ roomId, isPublicRead: false });
+
+      await dataSource.destroy();
+    });
+
+    test("returns 403 when token belongs to a different room", async () => {
+      const { app, dataSource, roomService } = await createApiHarness();
+      const { roomId: roomA } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+      });
+      const { roomId: roomB } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-2",
+        isPublicRead: false,
+      });
+      // Get a token for room B
+      const { token: tokenB } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-3",
+        isPublicRead: false,
+      });
+
+      const res = await app.fetch(new Request(`http://localhost/rooms/${roomA}/snapshot`, {
+        headers: { authorization: `Bearer ${tokenB}` },
+      }));
+
+      expect(res.status).toBe(403);
+      expect((await res.json()).error.code).toBe("FORBIDDEN");
+
+      await dataSource.destroy();
+    });
+
+    test("returns 404 for unknown room", async () => {
+      const { app, dataSource } = await createApiHarness();
+
+      const res = await app.fetch(new Request("http://localhost/rooms/unknown-room/snapshot"));
+
+      expect(res.status).toBe(404);
+      expect((await res.json()).error.code).toBe("ROOM_NOT_FOUND");
+
+      await dataSource.destroy();
+    });
+  });
+
+  // -- POST /rooms/:id/close ------------------------------------------------
+
+  describe("POST /rooms/:id/close", () => {
+    test("closes room and broadcasts sys:roomClosed", async () => {
+      const { app, dataSource, roomService, broadcastProvider } = await createApiHarness();
+      const { roomId, token } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+      });
+      const messages: string[] = [];
+      broadcastProvider.addSocket(roomId, { send: (data: string) => messages.push(data) });
+
+      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/close`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      }));
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+
+      const events = messages.map((m) => JSON.parse(m));
+      expect(events.map((e) => e.type)).toEqual(["sys:roomClosed"]);
+      expect(events[0].payload).toMatchObject({ roomId, reason: "manual" });
+      expect(typeof events[0].payload.closedAt).toBe("number");
+
+      const meta = await roomService.getRoomMeta(roomId);
+      expect(meta.closedReason).toBe("manual");
+      expect(meta.closedAt).toBeTruthy();
+
+      await dataSource.destroy();
+    });
+
+    test("accepts token from request body", async () => {
+      const { app, dataSource, roomService, broadcastProvider } = await createApiHarness();
+      const { roomId, token } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+      });
+      const messages: string[] = [];
+      broadcastProvider.addSocket(roomId, { send: (data: string) => messages.push(data) });
+
+      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/close`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token }),
+      }));
+
+      expect(res.status).toBe(200);
+      expect(messages.length).toBeGreaterThan(0);
+      expect(JSON.parse(messages[0]).type).toBe("sys:roomClosed");
+
+      await dataSource.destroy();
+    });
+
+    test("returns 401 when no token is provided", async () => {
+      const { app, dataSource, roomService } = await createApiHarness();
+      const { roomId } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+      });
+
+      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/close`, {
+        method: "POST",
+      }));
+
+      expect(res.status).toBe(401);
+      expect((await res.json()).error.code).toBe("UNAUTHORIZED");
+
+      await dataSource.destroy();
+    });
+
+    test("returns 403 when a participant tries to close", async () => {
+      const { app, dataSource, roomService, sessionService } = await createApiHarness();
+      const { roomId } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+      });
+      const { token: participantToken } = await sessionService.createSession({
+        roomId,
+        role: "participant",
+        roomUserId: "user:participant",
+      });
+
+      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/close`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${participantToken}` },
+      }));
+
+      expect(res.status).toBe(403);
+      expect((await res.json()).error.code).toBe("FORBIDDEN");
+
+      await dataSource.destroy();
+    });
+
+    test("returns 403 when token is for a different room", async () => {
+      const { app, dataSource, roomService } = await createApiHarness();
+      const { roomId: roomA } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+      });
+      const { token: tokenB } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-2",
+        isPublicRead: false,
+      });
+
+      const res = await app.fetch(new Request(`http://localhost/rooms/${roomA}/close`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${tokenB}` },
+      }));
+
+      expect(res.status).toBe(403);
+      expect((await res.json()).error.code).toBe("FORBIDDEN");
+
+      await dataSource.destroy();
+    });
+
+    test("idempotent: closing an already closed room succeeds", async () => {
+      const { app, dataSource, roomService } = await createApiHarness();
+      const { roomId, token } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        isPublicRead: false,
+      });
+      await roomService.closeRoom(roomId, "manual");
+
+      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/close`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      }));
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+
+      await dataSource.destroy();
+    });
   });
 });
+

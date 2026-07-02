@@ -8,6 +8,7 @@ import type { RoomCloseReason, RoomMeta, RoomStateSnapshot, Session } from "../t
 import { RoomMetaEntity } from "../storage/room-meta.entity";
 import type { RoomStateStore } from "../storage/room-state-store";
 import type { SessionService } from "./session-service";
+import { randomRoomId } from "@/utils/random";
 
 export const createRoomInputSchema = z.object({
   roomType: z.string().min(1),
@@ -48,7 +49,18 @@ export class RoomService {
       throw new AppError("UNKNOWN_ROOM_TYPE", `Unknown room type: ${input.roomType}`, 400);
     }
 
-    const roomId = crypto.randomUUID();
+    let roomId = '';
+    for (let i = 0; i < 5; i++) {
+      roomId = randomRoomId();
+      const existing = await this.rooms.findOneBy({ roomId });
+      if (!existing) {
+        break;
+      }
+    }
+    if (!roomId) {
+      throw new AppError("ROOM_ID_GENERATION_FAILED", "Failed to generate unique room ID", 500);
+    }
+    
     const now = Date.now();
     const passwordHash = input.password ? await argon2.hash(input.password) : null;
     const meta: RoomMeta = {

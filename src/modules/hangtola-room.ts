@@ -22,6 +22,7 @@ export type RankState = {
   rankParticipants: Record<string, string>;
 };
 
+const TITLE_FIELD = "title";
 const RANK_ITEMS_FIELD = "rankItems";
 const RANK_ITEM_INDEX_FIELD = "rankItemIndex";
 const RANK_TABLE_FIELD = "rankTable";
@@ -42,6 +43,10 @@ const rankItemIdSchema = z.object({
   rankItemId: z.string().min(1),
 });
 
+const setTitleSchema = z.object({
+  title: z.string().trim().min(1),
+});
+
 const setRankSchema = z.object({
   rankItemId: z.string().min(1),
   rank: z.number(),
@@ -58,6 +63,13 @@ export const createHangToLaRoom = (resourceService: ResourceService): RuleSet =>
     .use(resRoom)
     .on("sys:userJoin", async (ctx, _payload, next) => {
       await next();
+      const title = await getTitle(ctx);
+      if (title) {
+        await ctx.send({
+          type: "state:title",
+          payload: { title },
+        });
+      }
       await ctx.send({
         type: "state:rank",
         payload: await getRankState(ctx),
@@ -182,11 +194,26 @@ export const createHangToLaRoom = (resourceService: ResourceService): RuleSet =>
         type: "room:delRank",
         payload: { rankItemId: data.rankItemId, roomUserId },
       });
+    })
+    .on("room:setTitle", async (ctx, payload, next) => {
+      const data = setTitleSchema.parse(payload);
+      await ctx.state.fields.set(TITLE_FIELD, data.title);
+
+      await next();
+      await ctx.broadcast({
+        type: "room:setTitle",
+        payload: { title: data.title },
+      });
     });
 };
 
 export function registerHangToLaRoom(resourceService: ResourceService): void {
   RoomRegistry.register("hangtola", createHangToLaRoom(resourceService));
+}
+
+async function getTitle(ctx: EventContext): Promise<string | undefined> {
+  const title = await ctx.state.fields.get<string | undefined>(TITLE_FIELD, undefined);
+  return title ?? undefined;
 }
 
 async function getRankState(ctx: EventContext): Promise<RankState> {

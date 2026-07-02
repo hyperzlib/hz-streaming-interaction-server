@@ -15,7 +15,28 @@ export function createRoomApi(deps: AppDeps): Hono {
   const app = new Hono();
   const createRoomBodySchema = createRoomInputSchema.omit({ ownerId: true });
 
-  app.post("/rooms/create", async (c) => {
+  app.get("/api/rooms/:id/info", async (c) => {
+    const roomId = c.req.param("id");
+    const meta = await deps.roomService.getRoomMeta(roomId);
+    if (meta.closedAt) {
+      return c.json({
+        roomId: meta.roomId,
+        roomType: meta.roomType,
+        hasPassword: !!meta.passwordHash,
+        createdAt: meta.createdAt,
+        isClosed: true,
+      });
+    }
+    return c.json({
+      roomId: meta.roomId,
+      roomType: meta.roomType,
+      hasPassword: !!meta.passwordHash,
+      createdAt: meta.createdAt,
+      isClosed: false,
+    });
+  });
+
+  app.post("/api/rooms/create", async (c) => {
     const user = await requireAuthUser(c.req.header("authorization"), deps);
     
     const input = createRoomBodySchema.parse(await c.req.json());
@@ -29,7 +50,7 @@ export function createRoomApi(deps: AppDeps): Hono {
     });
   });
 
-  app.post("/rooms/join", async (c) => {
+  app.post("/api/rooms/join", async (c) => {
     const user = await getOptionalAuthUser(c.req.header("authorization"), deps);
     const input = joinRoomInputSchema.parse(await c.req.json());
     const result = await deps.roomService.joinRoom({
@@ -42,7 +63,7 @@ export function createRoomApi(deps: AppDeps): Hono {
     });
   });
 
-  app.get("/rooms/:id/snapshot", async (c) => {
+  app.get("/api/rooms/:id/snapshot", async (c) => {
     const roomId = c.req.param("id");
     const snapshot = await deps.roomService.getSnapshot(roomId);
     if (!snapshot.meta.isPublicRead) {
@@ -54,7 +75,7 @@ export function createRoomApi(deps: AppDeps): Hono {
     return c.json(snapshot);
   });
 
-  app.post("/rooms/:id/close", async (c) => {
+  app.post("/api/rooms/:id/close", async (c) => {
     const roomId = c.req.param("id");
     const body = closeRoomSchema.parse(await c.req.json().catch(() => ({})));
     const token = body.token ?? readBearerOrQueryToken(c);

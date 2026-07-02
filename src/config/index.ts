@@ -55,6 +55,9 @@ export type AppConfig = {
     postLogoutRedirectUri: string;
     editProfileUrl: string;
   };
+  frontend: {
+    allowedOrigins: string[];
+  };
 };
 
 const localConfigPath = new URL("../../config/config.toml", import.meta.url);
@@ -91,6 +94,7 @@ export async function loadConfig(path = localConfigPath): Promise<AppConfig> {
   const roomCleanup = asRecord(parsed.roomCleanup);
   const resources = asRecord(parsed.resources);
   const auth = asRecord(parsed.auth);
+  const frontend = asRecord(parsed.frontend);
 
   return {
     server: {
@@ -173,5 +177,26 @@ export async function loadConfig(path = localConfigPath): Promise<AppConfig> {
         ?? stringValue(auth.postLogoutRedirectUri, "http://localhost:3000/"),
       editProfileUrl: process.env.OIDC_EDIT_PROFILE_URL ?? stringValue(auth.editProfileUrl, ""),
     },
+    frontend: {
+      allowedOrigins: stringArrayValue(
+        process.env.FRONTEND_ALLOWED_ORIGINS,
+        frontend.allowedOrigins,
+        [],
+      ),
+    },
   };
+}
+
+function stringArrayValue(
+  envValue: string | undefined,
+  configValue: unknown,
+  fallback: string[],
+): string[] {
+  if (envValue) {
+    return envValue.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  if (Array.isArray(configValue)) {
+    return configValue.filter((v): v is string => typeof v === "string");
+  }
+  return fallback;
 }

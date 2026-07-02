@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { toAppError } from "./errors";
@@ -28,11 +29,24 @@ export type AppDeps = {
     oidcService: OidcService;
     authSessionService: AuthSessionService;
     userService: UserService;
-  }
+  };
+  frontend: {
+    allowedOrigins: string[];
+  };
 };
 
 export function createApp(deps: AppDeps): Hono {
   const app = new Hono();
+
+  app.use(
+    "*",
+    cors({
+      origin: deps.frontend.allowedOrigins,
+      allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowHeaders: ["Content-Type", "Authorization"],
+      credentials: true,
+    }),
+  );
 
   app.onError((error, c) => {
     if (error instanceof HTTPException) {

@@ -42,6 +42,7 @@ async function harness() {
     broadcastProvider: new InProcessWsBroadcastProvider(stateStore),
     resourceService,
     sockets: { commandUrl: "ws://localhost/ws/command" },
+    frontend: { allowedOrigins: [] },
   });
 
   return {

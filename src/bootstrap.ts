@@ -68,6 +68,7 @@ export async function bootstrap(config: AppConfig) {
       authSessionService,
       userService,
     },
+    frontend: config.frontend,
   });
 
   for (const meta of await roomService.getActiveRooms()) {

@@ -51,3 +51,6 @@ sessionTtlSeconds = 604800
 loginStateTtlSeconds = 1200
 postLogoutRedirectUri = "http://localhost:3000/"
 editProfileUrl = ""
+
+[frontend]
+allowedOrigins = []
