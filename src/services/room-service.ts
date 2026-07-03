@@ -4,7 +4,7 @@ import type { Repository } from "typeorm";
 import { z } from "zod";
 import { AppError } from "../errors";
 import { RoomRegistry } from "../core/room-registry";
-import type { RoomCloseReason, RoomMeta, RoomStateSnapshot, Session } from "../types";
+import type { RoomCloseReason, RoomMeta, Session } from "../types";
 import { RoomMetaEntity } from "../storage/room-meta.entity";
 import type { RoomStateStore } from "../storage/room-state-store";
 import type { SessionService } from "./session-service";
@@ -13,7 +13,7 @@ import { randomRoomId } from "@/utils/random";
 export const createRoomInputSchema = z.object({
   roomType: z.string().min(1),
   ownerId: z.string().min(1),
-  isPublicRead: z.boolean().optional().default(false),
+  allowGuest: z.boolean().optional().default(false),
   password: z.string().min(1).optional(),
   roomUserName: z.string().optional(),
 });
@@ -68,7 +68,7 @@ export class RoomService {
       roomId,
       roomType: input.roomType,
       ownerId: input.ownerId,
-      isPublicRead: input.isPublicRead,
+      allowGuest: input.allowGuest,
       passwordHash,
       createdAt: now,
       closedAt: null,
@@ -99,6 +99,19 @@ export class RoomService {
       if (!ok) {
         throw new AppError("INVALID_ROOM_PASSWORD", "Invalid room password", 401);
       }
+    }
+
+    if (!input.userId) {
+      if (!meta.allowGuest) {
+        throw new AppError("GUEST_NOT_ALLOWED", "Room does not allow guests", 403);
+      }
+      const { token } = await this.sessionService.createSession({
+        roomId: meta.roomId,
+        role: "guest",
+        roomUserId: "guest",
+        userId: undefined,
+      });
+      return { token };
     }
 
     const roomUserIdentity = await this.resolveJoinRoomUserIdentity(meta, input);
@@ -160,13 +173,6 @@ export class RoomService {
       return;
     }
     await this.updateRoomMeta(roomId, { ...meta, closedAt, closedReason: reason });
-  }
-
-  async getSnapshot(roomId: string): Promise<{ meta: RoomMeta; state: RoomStateSnapshot }> {
-    return {
-      meta: await this.getRoomMeta(roomId),
-      state: await this.stateStore.getRoomState(roomId),
-    };
   }
 
   async getActiveRooms(): Promise<RoomMeta[]> {

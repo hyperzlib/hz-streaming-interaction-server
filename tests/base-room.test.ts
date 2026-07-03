@@ -23,7 +23,7 @@ function context(sent: Array<Omit<RoomEvent, "roomId" | "seq" | "timestamp">>): 
       roomId: "room-1",
       roomType: "score",
       ownerId: "owner",
-      isPublicRead: false,
+      allowGuest: false,
       createdAt: Date.now(),
     },
     session: {

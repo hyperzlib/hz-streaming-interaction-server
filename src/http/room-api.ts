@@ -6,8 +6,8 @@ import {
   joinRoomInputSchema,
 } from "../services/room-service";
 import type { RoomState } from "../storage/room-state";
-import type { RoomMeta, Session } from "../types";
-import { getOptionalAuthUser, readBearerOrQueryToken, requireAuthUser, requireSession } from "./auth";
+import type { RoomMeta, Session, BroadcastOpts } from "../types";
+import { getOptionalAuthUser, readBearerOrQueryToken, requireAuthUser } from "./auth";
 import { closeRoomSchema } from "./schemas";
 import { AppDeps } from "@/app";
 
@@ -23,6 +23,7 @@ export function createRoomApi(deps: AppDeps): Hono {
         roomId: meta.roomId,
         roomType: meta.roomType,
         hasPassword: !!meta.passwordHash,
+        allowGuest: meta.allowGuest,
         createdAt: meta.createdAt,
         isClosed: true,
       });
@@ -31,6 +32,7 @@ export function createRoomApi(deps: AppDeps): Hono {
       roomId: meta.roomId,
       roomType: meta.roomType,
       hasPassword: !!meta.passwordHash,
+      allowGuest: meta.allowGuest,
       createdAt: meta.createdAt,
       isClosed: false,
     });
@@ -62,18 +64,6 @@ export function createRoomApi(deps: AppDeps): Hono {
       ...result,
       sockets: deps.sockets,
     });
-  });
-
-  app.get("/api/rooms/:id/snapshot", async (c) => {
-    const roomId = c.req.param("id");
-    const snapshot = await deps.roomService.getSnapshot(roomId);
-    if (!snapshot.meta.isPublicRead) {
-      const session = await requireSession(c, deps.sessionService);
-      if (session.roomId !== roomId) {
-        throw new AppError("FORBIDDEN", "Token does not belong to this room", 403);
-      }
-    }
-    return c.json(snapshot);
   });
 
   app.post("/api/rooms/:id/close", async (c) => {
@@ -119,12 +109,12 @@ function makeEventContext(
     session,
     state,
     send: async () => {},
-    broadcast: async (event: { type: string; payload: unknown }) => {
+    broadcast: async (event: { type: string; payload: unknown }, opts?: BroadcastOpts) => {
       await deps.broadcastProvider.publishRoomEvent({
         roomId: roomMeta.roomId,
         type: event.type,
         payload: event.payload,
-      });
+      }, opts);
     },
   };
 }

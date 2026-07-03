@@ -15,7 +15,7 @@ function context(sent: ShortEvent[] = [], broadcasted: ShortEvent[] = []): Event
       roomId: "room-1",
       roomType: "score",
       ownerId: "owner",
-      isPublicRead: false,
+      allowGuest: false,
       createdAt: 1,
     },
     session: {

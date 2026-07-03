@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach } from "bun:test";
 import { DataSource } from "typeorm";
 import { RoomRegistry } from "../src/core/room-registry";
 import { createRuleSet } from "../src/core/rule-set";
-import { registerModules } from "../src/modules/score-room";
+import { registerScoreRoom } from "../src/modules/score-room";
 import { RoomService, createRoomRepository } from "../src/services/room-service";
 import { SessionService } from "../src/services/session-service";
 import { RoomMetaEntity } from "../src/storage/room-meta.entity";
@@ -32,7 +32,7 @@ async function createTestRoomService() {
 describe("RoomService", () => {
   beforeEach(() => {
     RoomRegistry.clear();
-    registerModules();
+    registerScoreRoom();
     RoomRegistry.register("temp", createRuleSet().enableTempUserName(true));
   });
 
@@ -42,7 +42,7 @@ describe("RoomService", () => {
     const result = await roomService.createRoom({
       roomType: "score",
       ownerId: "owner-1",
-      isPublicRead: true,
+      allowGuest: true,
     });
 
     const meta = await roomService.getRoomMeta(result.roomId);
@@ -66,7 +66,7 @@ describe("RoomService", () => {
     const { roomId } = await roomService.createRoom({
       roomType: "score",
       ownerId: "owner-1",
-      isPublicRead: false,
+      allowGuest: false,
       password: "secret",
     });
 
@@ -84,90 +84,95 @@ describe("RoomService", () => {
     await dataSource.destroy();
   });
 
-  test("creates temporary room user id when joining without login user id", async () => {
+  test("joins as guest when room allows guests", async () => {
     const { dataSource, roomService, sessionService } = await createTestRoomService();
 
     const { roomId } = await roomService.createRoom({
       roomType: "score",
       ownerId: "owner-1",
-      isPublicRead: false,
+      allowGuest: true,
     });
 
     const joined = await roomService.joinRoom({ roomId });
     const session = await sessionService.getSession(joined.token);
 
     expect(session?.userId).toBeUndefined();
-    expect(session?.roomUserId.startsWith("temp:")).toBe(true);
+    expect(session?.roomUserId).toBe("guest");
+    expect(session?.role).toBe("guest");
 
     await dataSource.destroy();
   });
 
-  test("requires room user name for anonymous join when temp names are enabled", async () => {
+  test("rejects guest join when room does not allow guests", async () => {
     const { dataSource, roomService } = await createTestRoomService();
 
     const { roomId } = await roomService.createRoom({
-      roomType: "temp",
+      roomType: "score",
       ownerId: "owner-1",
-      isPublicRead: false,
-      password: "secret",
+      allowGuest: false,
     });
 
-    await expect(roomService.joinRoom({ roomId, password: "secret" })).rejects.toThrow(
-      "Room user name is required",
+    await expect(roomService.joinRoom({ roomId })).rejects.toThrow(
+      "Room does not allow guests",
     );
 
     await dataSource.destroy();
   });
 
-  test("uses normalized room user name hash and rejects duplicate active temp names", async () => {
+  test("guests join room with temp names enabled", async () => {
     const { dataSource, roomService, sessionService } = await createTestRoomService();
 
     const { roomId } = await roomService.createRoom({
       roomType: "temp",
       ownerId: "owner-1",
-      isPublicRead: false,
+      allowGuest: true,
       password: "secret",
     });
 
-    const first = await roomService.joinRoom({
-      roomId,
-      password: "secret",
-      roomUserName: "  Alice   Chen  ",
-    });
-    const firstSession = await sessionService.getSession(first.token);
-    expect(firstSession?.roomUserName).toBe("Alice Chen");
-    expect(firstSession?.roomUserId).toMatch(/^temp:[0-9a-f]{64}$/);
-
-    await expect(roomService.joinRoom({
-      roomId,
-      password: "secret",
-      roomUserName: "Alice Chen",
-    })).rejects.toThrow("Room user name is already taken");
-
-    await sessionService.deleteSession(first.token);
-    const joinedAgain = await roomService.joinRoom({
-      roomId,
-      password: "secret",
-      roomUserName: "Alice Chen",
-    });
-    expect((await sessionService.getSession(joinedAgain.token))?.roomUserId).toBe(firstSession?.roomUserId);
+    const joined = await roomService.joinRoom({ roomId, password: "secret" });
+    const session = await sessionService.getSession(joined.token);
+    expect(session?.role).toBe("guest");
+    expect(session?.roomUserId).toBe("guest");
 
     await dataSource.destroy();
   });
 
-  test("names are scoped by room and logged in users ignore room user name", async () => {
+  test("guests bypass temp name system", async () => {
+    const { dataSource, roomService, sessionService } = await createTestRoomService();
+
+    const { roomId } = await roomService.createRoom({
+      roomType: "temp",
+      ownerId: "owner-1",
+      allowGuest: true,
+      password: "secret",
+    });
+
+    const joined = await roomService.joinRoom({
+      roomId,
+      password: "secret",
+      roomUserName: "Alice",
+    });
+    const session = await sessionService.getSession(joined.token);
+    expect(session?.role).toBe("guest");
+    expect(session?.roomUserId).toBe("guest");
+    expect(session?.roomUserName).toBeUndefined();
+
+    await dataSource.destroy();
+  });
+
+  test("guests share the same room user id across rooms", async () => {
     const { dataSource, roomService, sessionService } = await createTestRoomService();
 
     const firstRoom = await roomService.createRoom({
       roomType: "temp",
       ownerId: "owner-1",
-      isPublicRead: false,
+      allowGuest: true,
       password: "secret",
     });
     const secondRoom = await roomService.createRoom({
       roomType: "temp",
       ownerId: "owner-2",
-      isPublicRead: false,
+      allowGuest: true,
       password: "secret",
     });
 
@@ -188,9 +193,10 @@ describe("RoomService", () => {
       userId: "login-user",
     });
 
-    expect((await sessionService.getSession(first.token))?.roomUserId).not.toBe(
-      (await sessionService.getSession(second.token))?.roomUserId,
-    );
+    expect((await sessionService.getSession(first.token))?.role).toBe("guest");
+    expect((await sessionService.getSession(first.token))?.roomUserId).toBe("guest");
+    expect((await sessionService.getSession(second.token))?.role).toBe("guest");
+    expect((await sessionService.getSession(second.token))?.roomUserId).toBe("guest");
     const loggedInSession = await sessionService.getSession(loggedIn.token);
     expect(loggedInSession).toMatchObject({
       userId: "login-user",
@@ -201,13 +207,13 @@ describe("RoomService", () => {
     await dataSource.destroy();
   });
 
-  test("host can kick another session but not self", async () => {
+  test("host can kick a guest", async () => {
     const { dataSource, roomService, sessionService, stateStore } = await createTestRoomService();
 
     const created = await roomService.createRoom({
       roomType: "temp",
       ownerId: "owner-1",
-      isPublicRead: false,
+      allowGuest: true,
       password: "secret",
     });
     const host = await sessionService.getSession(created.token);
@@ -216,39 +222,30 @@ describe("RoomService", () => {
       password: "secret",
       roomUserName: "Alice",
     });
-    const participant = await sessionService.getSession(joined.token);
-    await stateStore.forRoom(created.roomId).members.set(participant!.sessionId, {
-      sessionId: participant!.sessionId,
-      role: "participant",
-      roomUserId: participant!.roomUserId,
-      roomUserName: participant!.roomUserName,
+    const guestSession = await sessionService.getSession(joined.token);
+    await stateStore.forRoom(created.roomId).members.set(guestSession!.sessionId, {
+      sessionId: guestSession!.sessionId,
+      role: "guest",
+      roomUserId: "guest",
       joinedAt: 1,
       lastSeenAt: 1,
       presence: "online",
     });
 
-    await expect(roomService.kickSession(participant!, host!.sessionId)).rejects.toThrow(
+    await expect(roomService.kickSession(guestSession!, host!.sessionId)).rejects.toThrow(
       "Only host can kick room users",
     );
     await expect(roomService.kickSession(host!, host!.sessionId)).rejects.toThrow(
       "Host cannot kick self",
     );
 
-    const kicked = await roomService.kickSession(host!, participant!.sessionId);
+    const kicked = await roomService.kickSession(host!, guestSession!.sessionId);
     expect(kicked).toMatchObject({
-      sessionId: participant!.sessionId,
-      roomUserId: participant!.roomUserId,
-      roomUserName: "Alice",
+      sessionId: guestSession!.sessionId,
+      roomUserId: "guest",
     });
     expect(await sessionService.getSession(joined.token)).toBeNull();
-    expect(await stateStore.forRoom(created.roomId).members.get(participant!.sessionId)).toBeNull();
-
-    const rejoined = await roomService.joinRoom({
-      roomId: created.roomId,
-      password: "secret",
-      roomUserName: "Alice",
-    });
-    expect((await sessionService.getSession(rejoined.token))?.roomUserId).toBe(participant!.roomUserId);
+    expect(await stateStore.forRoom(created.roomId).members.get(guestSession!.sessionId)).toBeNull();
 
     await dataSource.destroy();
   });
@@ -259,7 +256,7 @@ describe("RoomService", () => {
     const { roomId } = await roomService.createRoom({
       roomType: "score",
       ownerId: "owner-1",
-      isPublicRead: false,
+      allowGuest: false,
     });
 
     await roomService.closeRoom(roomId, "manual", 1000);
@@ -278,7 +275,7 @@ describe("RoomService", () => {
     const { roomId } = await roomService.createRoom({
       roomType: "score",
       ownerId: "owner-1",
-      isPublicRead: false,
+      allowGuest: false,
     });
     await stateStore.nextSeq(roomId);
     await roomService.closeRoom(roomId, "manual", 1000);

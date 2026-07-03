@@ -1,7 +1,5 @@
 import type { Context } from "hono";
 import { AppError } from "../errors";
-import type { Session } from "../types";
-import type { SessionService } from "../services/session-service";
 import { AppDeps } from "@/app";
 import type { User } from "../storage/user.entity";
 
@@ -11,19 +9,6 @@ export function readBearerOrQueryToken(c: Context): string | null {
     return auth.slice("bearer ".length).trim();
   }
   return c.req.query("token") ?? null;
-}
-
-export async function requireSession(c: Context, sessionService: SessionService): Promise<Session> {
-  const token = readBearerOrQueryToken(c);
-  if (!token) {
-    throw new AppError("UNAUTHORIZED", "Missing token", 401);
-  }
-
-  const session = await sessionService.getSession(token);
-  if (!session) {
-    throw new AppError("UNAUTHORIZED", "Invalid token", 401);
-  }
-  return session;
 }
 
 export async function requireAuthUser(authorization: string | undefined, deps: AppDeps) {

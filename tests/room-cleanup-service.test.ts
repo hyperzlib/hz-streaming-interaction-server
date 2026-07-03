@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { DataSource } from "typeorm";
 import { RoomRegistry } from "../src/core/room-registry";
-import { registerModules } from "../src/modules/score-room";
+import { registerScoreRoom } from "../src/modules/score-room";
 import { InProcessWsBroadcastProvider } from "../src/services/broadcast-provider";
 import { RoomCleanupService, type RoomCleanupConfig } from "../src/services/room-cleanup-service";
 import { RoomService, createRoomRepository } from "../src/services/room-service";
@@ -52,12 +52,12 @@ async function createCleanupHarness(nowRef = { value: 0 }) {
 describe("RoomCleanupService", () => {
   beforeEach(() => {
     RoomRegistry.clear();
-    registerModules();
+    registerScoreRoom();
   });
 
   test("closes room when owner has been offline past grace", async () => {
     const { dataSource, roomService, stateStore, cleanupService, nowRef } = await createCleanupHarness({ value: 1201_000 });
-    const { roomId } = await roomService.createRoom({ roomType: "score", ownerId: "owner-1", isPublicRead: false });
+    const { roomId } = await roomService.createRoom({ roomType: "score", ownerId: "owner-1", allowGuest: false });
     await stateStore.setRoomState(roomId, {
       members: {
         host: {
@@ -92,7 +92,7 @@ describe("RoomCleanupService", () => {
 
   test("keeps room open when owner offline grace has not elapsed", async () => {
     const { dataSource, roomService, stateStore, cleanupService } = await createCleanupHarness({ value: 1199_000 });
-    const { roomId } = await roomService.createRoom({ roomType: "score", ownerId: "owner-1", isPublicRead: false });
+    const { roomId } = await roomService.createRoom({ roomType: "score", ownerId: "owner-1", allowGuest: false });
     await stateStore.setRoomState(roomId, {
       members: {
         host: {
@@ -118,7 +118,7 @@ describe("RoomCleanupService", () => {
   test("closes room only after empty room grace elapses", async () => {
     const nowRef = { value: 1000 };
     const { dataSource, roomService, cleanupService } = await createCleanupHarness(nowRef);
-    const { roomId } = await roomService.createRoom({ roomType: "score", ownerId: "owner-1", isPublicRead: true });
+    const { roomId } = await roomService.createRoom({ roomType: "score", ownerId: "owner-1", allowGuest: true });
 
     await cleanupService.scanOnce();
     expect((await roomService.getRoomMeta(roomId)).closedAt).toBeNull();
@@ -139,7 +139,7 @@ describe("RoomCleanupService", () => {
   test("clears empty room timer when a member joins again", async () => {
     const nowRef = { value: 1000 };
     const { dataSource, roomService, stateStore, cleanupService } = await createCleanupHarness(nowRef);
-    const { roomId } = await roomService.createRoom({ roomType: "score", ownerId: "owner-1", isPublicRead: false });
+    const { roomId } = await roomService.createRoom({ roomType: "score", ownerId: "owner-1", allowGuest: false });
 
     await cleanupService.scanOnce();
     nowRef.value += 60_000;
@@ -173,7 +173,7 @@ describe("RoomCleanupService", () => {
 
   test("deletes closed rooms after retention", async () => {
     const { dataSource, roomService, stateStore, cleanupService, nowRef } = await createCleanupHarness({ value: 1801_000 });
-    const { roomId } = await roomService.createRoom({ roomType: "score", ownerId: "owner-1", isPublicRead: false });
+    const { roomId } = await roomService.createRoom({ roomType: "score", ownerId: "owner-1", allowGuest: false });
     await stateStore.nextSeq(roomId);
     await roomService.closeRoom(roomId, "manual", 0);
 

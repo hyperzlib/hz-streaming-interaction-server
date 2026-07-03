@@ -1,6 +1,9 @@
 import { createRuleSet } from "../../core/rule-set";
 import { z } from "zod";
-import type { Member } from "../../types";
+import type { Member, EventContext } from "../../types";
+
+const guestDebounceTimers = new Map<string, Timer>();
+const GUEST_DEBOUNCE_MS = 10_000;
 
 const roomClosedSchema = z.object({
   roomId: z.string(),
@@ -10,7 +13,7 @@ const roomClosedSchema = z.object({
 
 const userLifecycleSchema = z.object({
   sessionId: z.string(),
-  role: z.enum(["host", "participant"]),
+  role: z.enum(["host", "participant", "guest"]),
   roomUserId: z.string(),
   roomUserName: z.string().optional(),
   userId: z.string().optional(),
@@ -71,6 +74,7 @@ export const baseRoomRules = createRuleSet()
       type: "sys:userJoin",
       payload: data,
     });
+    scheduleOnlineGuests(ctx);
   })
   .on("sys:userOffline", async (ctx, payload, next) => {
     const data = userLifecycleSchema.parse(payload);
@@ -87,6 +91,7 @@ export const baseRoomRules = createRuleSet()
       type: "sys:userOffline",
       payload: data,
     });
+    scheduleOnlineGuests(ctx);
   })
   .on("sys:userLeave", async (ctx, payload, next) => {
     const data = userLifecycleSchema.parse(payload);
@@ -96,10 +101,37 @@ export const baseRoomRules = createRuleSet()
       type: "sys:userLeave",
       payload: data,
     });
+    scheduleOnlineGuests(ctx);
   });
 
 function onlineMembers(members: Record<string, Member>): Member[] {
   return Object.values(members)
-    .filter((member) => member.presence === "online")
+    .filter((member) => member.presence === "online" && member.role !== "guest")
     .sort((left, right) => left.joinedAt - right.joinedAt || left.sessionId.localeCompare(right.sessionId));
+}
+
+function scheduleOnlineGuests(ctx: EventContext): void {
+  const roomId = ctx.roomId;
+  const existing = guestDebounceTimers.get(roomId);
+  if (existing) {
+    clearTimeout(existing);
+  }
+
+  const timer = setTimeout(async () => {
+    guestDebounceTimers.delete(roomId);
+    try {
+      const members = await ctx.state.members.all();
+      const guestCount = Object.values(members).filter(
+        (m) => m.role === "guest" && m.presence === "online",
+      ).length;
+      await ctx.broadcast({
+        type: "sys:onlineGuests",
+        payload: { guestCount },
+      });
+    } catch {
+      // Silently ignore errors in debounced broadcast
+    }
+  }, GUEST_DEBOUNCE_MS);
+
+  guestDebounceTimers.set(roomId, timer);
 }

@@ -15,7 +15,7 @@ export const RoomMetaEntity = new EntitySchema<RoomMeta>({
     ownerId: {
       type: "varchar",
     },
-    isPublicRead: {
+    allowGuest: {
       type: "boolean",
       default: false,
     },

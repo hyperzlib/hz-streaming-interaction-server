@@ -3,7 +3,7 @@ import type { InProcessWsBroadcastProvider } from "./broadcast-provider";
 import type { RoomService } from "./room-service";
 import type { RoomState } from "../storage/room-state";
 import type { RoomStateStore } from "../storage/room-state-store";
-import type { Member, RoomCloseReason, RoomMeta, Session } from "../types";
+import type { BroadcastOpts, Member, RoomCloseReason, RoomMeta, Session } from "../types";
 
 export type RoomCleanupConfig = {
   ownerOfflineGraceSeconds: number;
@@ -150,7 +150,14 @@ async function findOwnerMember(meta: RoomMeta, state: RoomState): Promise<Member
 }
 
 async function effectiveMemberCount(state: RoomState): Promise<number> {
-  return await state.members.count();
+  const members = await state.members.all();
+  let count = 0;
+  for (const member of Object.values(members)) {
+    if (member.role !== "guest") {
+      count++;
+    }
+  }
+  return count;
 }
 
 function makeSystemEventContext(
@@ -172,12 +179,12 @@ function makeSystemEventContext(
     session,
     state,
     send: async () => {},
-    broadcast: async (event: { type: string; payload: unknown }) => {
+    broadcast: async (event: { type: string; payload: unknown }, opts?: BroadcastOpts) => {
       await broadcastProvider.publishRoomEvent({
         roomId: roomMeta.roomId,
         type: event.type,
         payload: event.payload,
-      });
+      }, opts);
     },
   };
 }

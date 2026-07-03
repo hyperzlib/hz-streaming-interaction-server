@@ -10,7 +10,7 @@ import type { RoomService } from "../services/room-service";
 import type { SessionService } from "../services/session-service";
 import type { RoomState } from "../storage/room-state";
 import type { RoomStateStore } from "../storage/room-state-store";
-import type { RoomMeta, Session, EventContext } from "../types";
+import type { RoomMeta, Session, EventContext, BroadcastOpts } from "../types";
 import { WSContext } from "hono/ws";
 
 export type CommandSocketDeps = {
@@ -51,7 +51,7 @@ export function createCommandSocketApi(deps: CommandSocketDeps): Hono {
 
           const meta = await deps.roomService.getRoomMeta(session.roomId);
           joinedRoomId = session.roomId;
-          deps.broadcastProvider.addSocket(joinedRoomId, ws);
+          deps.broadcastProvider.addSocket(joinedRoomId, ws, session.role === "guest");
           markSessionConnected(activeSessionConnections, leaveTimers, session);
           addSessionSocket(sessionSockets, session.sessionId, ws);
           const state = deps.stateStore.forRoom(session.roomId);
@@ -90,6 +90,10 @@ export function createCommandSocketApi(deps: CommandSocketDeps): Hono {
             const meta = await deps.roomService.getRoomMeta(command.roomId);
             if (meta.closedAt) {
               throw new AppError("ROOM_CLOSED", "Room is closed", 410);
+            }
+
+            if (session.role === "guest") {
+              throw new AppError("FORBIDDEN", "Guests cannot send commands", 403);
             }
 
             if (command.type === "room:kick") {
@@ -317,12 +321,12 @@ function makeEventContext(
     send: async (event: { type: string; payload: unknown }) => {
       ws?.send(JSON.stringify(event));
     },
-    broadcast: async (event: { type: string; payload: unknown }) => {
+    broadcast: async (event: { type: string; payload: unknown }, opts?: BroadcastOpts) => {
       await deps.broadcastProvider.publishRoomEvent({
         roomId: roomMeta.roomId,
         type: event.type,
         payload: event.payload,
-      });
+      }, opts);
     },
   } satisfies EventContext;
 }

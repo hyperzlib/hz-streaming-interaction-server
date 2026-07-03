@@ -12,7 +12,7 @@ function context(): EventContext {
       roomId: "room-1",
       roomType: "score",
       ownerId: "owner",
-      isPublicRead: false,
+      allowGuest: false,
       createdAt: Date.now(),
     },
     session: {

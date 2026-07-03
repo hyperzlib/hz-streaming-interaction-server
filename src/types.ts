@@ -12,7 +12,7 @@ export type RoomClosedPayload = {
 
 export type Member = {
   sessionId: string;
-  role: "host" | "participant";
+  role: "host" | "participant" | "guest";
   roomUserId: string;
   roomUserName?: string;
   userId?: string;
@@ -25,7 +25,7 @@ export type RoomMeta = {
   roomId: string;
   roomType: string;
   ownerId: string;
-  isPublicRead: boolean;
+  allowGuest: boolean;
   passwordHash?: string | null;
   createdAt: number;
   closedAt?: number | null;
@@ -39,7 +39,7 @@ export type RoomStateSnapshot = {
 export type Session = {
   sessionId: string;
   roomId: string;
-  role: "host" | "participant";
+  role: "host" | "participant" | "guest";
   roomUserId: string;
   roomUserName?: string;
   userId?: string;
@@ -60,12 +60,16 @@ export type DispatchRequest = {
   payload: unknown;
 };
 
+export type BroadcastOpts = {
+  excludeGuests?: boolean;
+};
+
 export type EventContext = {
   roomId: string;
   roomMeta: RoomMeta;
   session: Session;
   send: (event: Omit<RoomEvent, "roomId" | "seq" | "timestamp">) => Promise<void>;
-  broadcast: (event: Omit<RoomEvent, "roomId" | "seq" | "timestamp">) => Promise<void>;
+  broadcast: (event: Omit<RoomEvent, "roomId" | "seq" | "timestamp">, opts?: BroadcastOpts) => Promise<void>;
   state: RoomState;
 };
 

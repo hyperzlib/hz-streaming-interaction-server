@@ -85,10 +85,10 @@ describe("Room API", () => {
       const { roomId } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-1",
-        isPublicRead: false,
+        allowGuest: false,
       });
 
-      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/info`));
+      const res = await app.fetch(new Request(`http://localhost/api/rooms/${roomId}/info`));
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -108,11 +108,11 @@ describe("Room API", () => {
       const { roomId } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-1",
-        isPublicRead: false,
+        allowGuest: false,
         password: "secret",
       });
 
-      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/info`));
+      const res = await app.fetch(new Request(`http://localhost/api/rooms/${roomId}/info`));
 
       expect(res.status).toBe(200);
       expect(await res.json()).toMatchObject({ hasPassword: true, isClosed: false });
@@ -125,11 +125,11 @@ describe("Room API", () => {
       const { roomId } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-1",
-        isPublicRead: false,
+        allowGuest: false,
       });
       await roomService.closeRoom(roomId, "manual");
 
-      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/info`));
+      const res = await app.fetch(new Request(`http://localhost/api/rooms/${roomId}/info`));
 
       expect(res.status).toBe(200);
       expect(await res.json()).toMatchObject({ isClosed: true });
@@ -140,7 +140,7 @@ describe("Room API", () => {
     test("returns 404 for unknown room", async () => {
       const { app, dataSource } = await createApiHarness();
 
-      const res = await app.fetch(new Request("http://localhost/rooms/unknown-room/info"));
+      const res = await app.fetch(new Request("http://localhost/api/rooms/unknown-room/info"));
 
       expect(res.status).toBe(404);
       const body = await res.json();
@@ -157,13 +157,13 @@ describe("Room API", () => {
       const { app, authSessionService, dataSource, roomService, userService } = await createApiHarness();
       const authToken = await createAuthToken(userService, authSessionService, "login-user");
 
-      const res = await app.fetch(new Request("http://localhost/rooms/create", {
+      const res = await app.fetch(new Request("http://localhost/api/rooms/create", {
         method: "POST",
         headers: {
           authorization: `Bearer ${authToken}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ roomType: "score", isPublicRead: true }),
+        body: JSON.stringify({ roomType: "score", allowGuest: true }),
       }));
 
       expect(res.status).toBe(200);
@@ -174,7 +174,7 @@ describe("Room API", () => {
 
       const meta = await roomService.getRoomMeta(body.roomId);
       expect(meta.ownerId).toBe("login-user");
-      expect(meta.isPublicRead).toBe(true);
+      expect(meta.allowGuest).toBe(true);
 
       await dataSource.destroy();
     });
@@ -183,7 +183,7 @@ describe("Room API", () => {
       const { app, authSessionService, dataSource, roomService, userService } = await createApiHarness();
       const authToken = await createAuthToken(userService, authSessionService, "login-user");
 
-      const res = await app.fetch(new Request("http://localhost/rooms/create", {
+      const res = await app.fetch(new Request("http://localhost/api/rooms/create", {
         method: "POST",
         headers: {
           authorization: `Bearer ${authToken}`,
@@ -192,7 +192,7 @@ describe("Room API", () => {
         body: JSON.stringify({
           roomType: "score",
           ownerId: "spoofed-owner",
-          isPublicRead: true,
+          allowGuest: true,
         }),
       }));
 
@@ -207,10 +207,10 @@ describe("Room API", () => {
     test("returns 401 when no auth token is provided", async () => {
       const { app, dataSource } = await createApiHarness();
 
-      const res = await app.fetch(new Request("http://localhost/rooms/create", {
+      const res = await app.fetch(new Request("http://localhost/api/rooms/create", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ roomType: "score", isPublicRead: true }),
+        body: JSON.stringify({ roomType: "score", allowGuest: true }),
       }));
 
       expect(res.status).toBe(401);
@@ -223,7 +223,7 @@ describe("Room API", () => {
       const { app, authSessionService, dataSource, userService } = await createApiHarness();
       const authToken = await createAuthToken(userService, authSessionService, "login-user");
 
-      const res = await app.fetch(new Request("http://localhost/rooms/create", {
+      const res = await app.fetch(new Request("http://localhost/api/rooms/create", {
         method: "POST",
         headers: {
           authorization: `Bearer ${authToken}`,
@@ -242,7 +242,7 @@ describe("Room API", () => {
       const { app, authSessionService, dataSource, userService } = await createApiHarness();
       const authToken = await createAuthToken(userService, authSessionService, "login-user");
 
-      const res = await app.fetch(new Request("http://localhost/rooms/create", {
+      const res = await app.fetch(new Request("http://localhost/api/rooms/create", {
         method: "POST",
         headers: {
           authorization: `Bearer ${authToken}`,
@@ -266,11 +266,11 @@ describe("Room API", () => {
       const { roomId } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-1",
-        isPublicRead: false,
+        allowGuest: false,
       });
       const authToken = await createAuthToken(userService, authSessionService, "login-user");
 
-      const res = await app.fetch(new Request("http://localhost/rooms/join", {
+      const res = await app.fetch(new Request("http://localhost/api/rooms/join", {
         method: "POST",
         headers: {
           authorization: `Bearer ${authToken}`,
@@ -288,26 +288,46 @@ describe("Room API", () => {
       await dataSource.destroy();
     });
 
-    test("joins anonymously with temp room user id when not authenticated", async () => {
+    test("joins as guest when not authenticated and room allows guests", async () => {
       const { app, dataSource, roomService, sessionService } = await createApiHarness();
       const { roomId } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-1",
-        isPublicRead: false,
+        allowGuest: true,
       });
 
-      const res = await app.fetch(new Request("http://localhost/rooms/join", {
+      const res = await app.fetch(new Request("http://localhost/api/rooms/join", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ roomId, userId: "spoofed-user" }),
+        body: JSON.stringify({ roomId }),
       }));
 
       expect(res.status).toBe(200);
       const body = await res.json() as { token: string };
       const session = await sessionService.getSession(body.token);
       expect(session?.userId).toBeUndefined();
-      expect(session?.roomUserId.startsWith("temp:")).toBe(true);
-      expect(session?.role).toBe("participant");
+      expect(session?.roomUserId).toBe("guest");
+      expect(session?.role).toBe("guest");
+
+      await dataSource.destroy();
+    });
+
+    test("rejects anonymous join when room does not allow guests", async () => {
+      const { app, dataSource, roomService } = await createApiHarness();
+      const { roomId } = await roomService.createRoom({
+        roomType: "score",
+        ownerId: "owner-1",
+        allowGuest: false,
+      });
+
+      const res = await app.fetch(new Request("http://localhost/api/rooms/join", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ roomId }),
+      }));
+
+      expect(res.status).toBe(403);
+      expect((await res.json()).error.code).toBe("GUEST_NOT_ALLOWED");
 
       await dataSource.destroy();
     });
@@ -317,11 +337,11 @@ describe("Room API", () => {
       const { roomId } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-1",
-        isPublicRead: false,
+        allowGuest: true,
         password: "secret",
       });
 
-      const res = await app.fetch(new Request("http://localhost/rooms/join", {
+      const res = await app.fetch(new Request("http://localhost/api/rooms/join", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ roomId, password: "secret" }),
@@ -338,11 +358,11 @@ describe("Room API", () => {
       const { roomId } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-1",
-        isPublicRead: false,
+        allowGuest: false,
         password: "secret",
       });
 
-      const res = await app.fetch(new Request("http://localhost/rooms/join", {
+      const res = await app.fetch(new Request("http://localhost/api/rooms/join", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ roomId, password: "wrong" }),
@@ -359,11 +379,11 @@ describe("Room API", () => {
       const { roomId } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-1",
-        isPublicRead: false,
+        allowGuest: false,
       });
       await roomService.closeRoom(roomId, "manual");
 
-      const res = await app.fetch(new Request("http://localhost/rooms/join", {
+      const res = await app.fetch(new Request("http://localhost/api/rooms/join", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ roomId }),
@@ -378,7 +398,7 @@ describe("Room API", () => {
     test("returns 404 for unknown room", async () => {
       const { app, dataSource } = await createApiHarness();
 
-      const res = await app.fetch(new Request("http://localhost/rooms/join", {
+      const res = await app.fetch(new Request("http://localhost/api/rooms/join", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ roomId: "nonexistent" }),
@@ -395,10 +415,10 @@ describe("Room API", () => {
       const { roomId } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-1",
-        isPublicRead: false,
+        allowGuest: true,
       });
 
-      const res = await app.fetch(new Request("http://localhost/rooms/join", {
+      const res = await app.fetch(new Request("http://localhost/api/rooms/join", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ roomId }),
@@ -412,103 +432,6 @@ describe("Room API", () => {
     });
   });
 
-  // -- GET /rooms/:id/snapshot ----------------------------------------------
-
-  describe("GET /rooms/:id/snapshot", () => {
-    test("returns full snapshot for a public-read room without token", async () => {
-      const { app, dataSource, roomService } = await createApiHarness();
-      const { roomId } = await roomService.createRoom({
-        roomType: "score",
-        ownerId: "owner-1",
-        isPublicRead: true,
-      });
-
-      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/snapshot`));
-
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.meta).toMatchObject({ roomId, roomType: "score", isPublicRead: true });
-      expect(body.state).toEqual({ members: {} });
-
-      await dataSource.destroy();
-    });
-
-    test("returns 401 for private room without token", async () => {
-      const { app, dataSource, roomService } = await createApiHarness();
-      const { roomId } = await roomService.createRoom({
-        roomType: "score",
-        ownerId: "owner-1",
-        isPublicRead: false,
-      });
-
-      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/snapshot`));
-
-      expect(res.status).toBe(401);
-      expect((await res.json()).error.code).toBe("UNAUTHORIZED");
-
-      await dataSource.destroy();
-    });
-
-    test("returns snapshot for private room with valid session token", async () => {
-      const { app, dataSource, roomService } = await createApiHarness();
-      const { roomId, token } = await roomService.createRoom({
-        roomType: "score",
-        ownerId: "owner-1",
-        isPublicRead: false,
-      });
-
-      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/snapshot`, {
-        headers: { authorization: `Bearer ${token}` },
-      }));
-
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.meta).toMatchObject({ roomId, isPublicRead: false });
-
-      await dataSource.destroy();
-    });
-
-    test("returns 403 when token belongs to a different room", async () => {
-      const { app, dataSource, roomService } = await createApiHarness();
-      const { roomId: roomA } = await roomService.createRoom({
-        roomType: "score",
-        ownerId: "owner-1",
-        isPublicRead: false,
-      });
-      const { roomId: roomB } = await roomService.createRoom({
-        roomType: "score",
-        ownerId: "owner-2",
-        isPublicRead: false,
-      });
-      // Get a token for room B
-      const { token: tokenB } = await roomService.createRoom({
-        roomType: "score",
-        ownerId: "owner-3",
-        isPublicRead: false,
-      });
-
-      const res = await app.fetch(new Request(`http://localhost/rooms/${roomA}/snapshot`, {
-        headers: { authorization: `Bearer ${tokenB}` },
-      }));
-
-      expect(res.status).toBe(403);
-      expect((await res.json()).error.code).toBe("FORBIDDEN");
-
-      await dataSource.destroy();
-    });
-
-    test("returns 404 for unknown room", async () => {
-      const { app, dataSource } = await createApiHarness();
-
-      const res = await app.fetch(new Request("http://localhost/rooms/unknown-room/snapshot"));
-
-      expect(res.status).toBe(404);
-      expect((await res.json()).error.code).toBe("ROOM_NOT_FOUND");
-
-      await dataSource.destroy();
-    });
-  });
-
   // -- POST /rooms/:id/close ------------------------------------------------
 
   describe("POST /rooms/:id/close", () => {
@@ -517,12 +440,12 @@ describe("Room API", () => {
       const { roomId, token } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-1",
-        isPublicRead: false,
+        allowGuest: false,
       });
       const messages: string[] = [];
-      broadcastProvider.addSocket(roomId, { send: (data: string) => messages.push(data) });
+      broadcastProvider.addSocket(roomId, { send: (data: string) => messages.push(data) }, false);
 
-      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/close`, {
+      const res = await app.fetch(new Request(`http://localhost/api/rooms/${roomId}/close`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}` },
       }));
@@ -547,12 +470,12 @@ describe("Room API", () => {
       const { roomId, token } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-1",
-        isPublicRead: false,
+        allowGuest: false,
       });
       const messages: string[] = [];
-      broadcastProvider.addSocket(roomId, { send: (data: string) => messages.push(data) });
+      broadcastProvider.addSocket(roomId, { send: (data: string) => messages.push(data) }, false);
 
-      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/close`, {
+      const res = await app.fetch(new Request(`http://localhost/api/rooms/${roomId}/close`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ token }),
@@ -570,10 +493,10 @@ describe("Room API", () => {
       const { roomId } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-1",
-        isPublicRead: false,
+        allowGuest: false,
       });
 
-      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/close`, {
+      const res = await app.fetch(new Request(`http://localhost/api/rooms/${roomId}/close`, {
         method: "POST",
       }));
 
@@ -588,7 +511,7 @@ describe("Room API", () => {
       const { roomId } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-1",
-        isPublicRead: false,
+        allowGuest: false,
       });
       const { token: participantToken } = await sessionService.createSession({
         roomId,
@@ -596,7 +519,7 @@ describe("Room API", () => {
         roomUserId: "user:participant",
       });
 
-      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/close`, {
+      const res = await app.fetch(new Request(`http://localhost/api/rooms/${roomId}/close`, {
         method: "POST",
         headers: { authorization: `Bearer ${participantToken}` },
       }));
@@ -612,15 +535,15 @@ describe("Room API", () => {
       const { roomId: roomA } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-1",
-        isPublicRead: false,
+        allowGuest: false,
       });
       const { token: tokenB } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-2",
-        isPublicRead: false,
+        allowGuest: false,
       });
 
-      const res = await app.fetch(new Request(`http://localhost/rooms/${roomA}/close`, {
+      const res = await app.fetch(new Request(`http://localhost/api/rooms/${roomA}/close`, {
         method: "POST",
         headers: { authorization: `Bearer ${tokenB}` },
       }));
@@ -636,11 +559,11 @@ describe("Room API", () => {
       const { roomId, token } = await roomService.createRoom({
         roomType: "score",
         ownerId: "owner-1",
-        isPublicRead: false,
+        allowGuest: false,
       });
       await roomService.closeRoom(roomId, "manual");
 
-      const res = await app.fetch(new Request(`http://localhost/rooms/${roomId}/close`, {
+      const res = await app.fetch(new Request(`http://localhost/api/rooms/${roomId}/close`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}` },
       }));
